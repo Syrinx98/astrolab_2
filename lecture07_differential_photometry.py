@@ -4,9 +4,7 @@
 In this script, we perform differential photometry using aperture photometry results obtained
 from a previously implemented AperturePhotometry class.
 
-**Main correction implemented:**
-Astropy's Time objects (`target_ap08.bjd_tdb`) need to be converted to numerical values (JD as floats)
-before plotting or performing arithmetic operations. We do so by using the `to_value('jd')` method.
+
 
 We also add comments to explain the changes and their purpose.
 """
@@ -167,17 +165,19 @@ e_r2 = reference02_ap08.aperture_errors
 
 differential_ap08_ref01 = F_t / F_r1
 differential_ap08_ref02 = F_t / F_r2
-differential_ap08_allref = F_t / (F_r1 + F_r2)
-
-# Error propagation for ratios
-differential_ap08_ref01_error = differential_ap08_ref01 * np.sqrt((e_t/F_t)**2 + (e_r1/F_r1)**2)
-differential_ap08_ref02_error = differential_ap08_ref02 * np.sqrt((e_t/F_t)**2 + (e_r2/F_r2)**2)
 F_rsum = F_r1 + F_r2
 e_rsum = np.sqrt(e_r1**2 + e_r2**2)
+differential_ap08_allref = F_t / F_rsum
+
+# Error propagation for ratios:
+# Se Q = A/B, allora sigma_Q = Q * sqrt((sigma_A/A)^2 + (sigma_B/B)^2)
+differential_ap08_ref01_error = differential_ap08_ref01 * np.sqrt((e_t/F_t)**2 + (e_r1/F_r1)**2)
+differential_ap08_ref02_error = differential_ap08_ref02 * np.sqrt((e_t/F_t)**2 + (e_r2/F_r2)**2)
 differential_ap08_allref_error = differential_ap08_allref * np.sqrt((e_t/F_t)**2 + (e_rsum/F_rsum)**2)
 
+# Plot differenziale con una singola stella di riferimento
 plt.figure(figsize=(8,4))
-plt.scatter(bjd_tdb_num-time_offset, differential_ap08_ref01, s=2, c='C0', label='Ref #1')
+plt.scatter(bjd_tdb_num - time_offset, differential_ap08_ref01, s=2, c='C0', label='Ref #1')
 plt.xlabel('BJD-TDB - {0:.1f} [days]'.format(time_offset))
 plt.ylabel('Differential photometry')
 plt.ylim(2.200, 2.300)
@@ -185,7 +185,7 @@ plt.legend()
 plt.show()
 
 plt.figure(figsize=(8,4))
-plt.scatter(bjd_tdb_num-time_offset, differential_ap08_ref02, s=2, c='C1', label='Ref #2')
+plt.scatter(bjd_tdb_num - time_offset, differential_ap08_ref02, s=2, c='C1', label='Ref #2')
 plt.xlabel('BJD-TDB - {0:.1f} [days]'.format(time_offset))
 plt.ylabel('Differential photometry')
 plt.ylim(0.268, 0.278)
@@ -193,37 +193,21 @@ plt.legend()
 plt.show()
 
 plt.figure(figsize=(8,4))
-plt.scatter(bjd_tdb_num-time_offset, differential_ap08_allref, s=2, c='C3', label='Sum of refs')
+plt.scatter(bjd_tdb_num - time_offset, differential_ap08_allref, s=2, c='C3', label='Sum of refs')
 plt.xlabel('BJD-TDB - {0:.1f} [days]'.format(time_offset))
 plt.ylabel('Differential photometry')
 plt.ylim(0.240, 0.250)
 plt.legend()
 plt.show()
 
-# Select out-of-transit region
-differential_ap08_ref01_error = differential_ap08_ref01_error
-differential_ap08_ref02_error = differential_ap08_ref02_error
-differential_ap08_allref_error = differential_ap08_allref_error
+# Selezione della regione out-of-transit:
+out_transit_selection = ((bjd_tdb_num < 2460024.3450) | (bjd_tdb_num > 2460024.4350)) & (bjd_tdb_num < 2460024.4475)
 
-plt.figure()
-plt.scatter(bjd_tdb_num-time_offset, differential_ap08_allref, s=2, label='All refs')
-plt.errorbar(bjd_tdb_num-time_offset, differential_ap08_allref, yerr=differential_ap08_allref_error, fmt=' ', c='k', alpha=0.25, zorder=-1)
-plt.axvline(2460024.3450-time_offset, c='C3')
-plt.axvline(2460024.4350-time_offset, c='C3')
-plt.xlabel('BJD-TDB - {0:.1f} [days]'.format(time_offset))
-plt.ylabel('Differential photometry')
-plt.ylim(0.240,0.250)
-plt.show()
-
-# Polynomial normalization
-bjd_tdb = target_ap08.bjd_tdb
-bjd_tdb_num = bjd_tdb.to_value('jd')  # numeric conversion for polynomial fit
+# Fit polinomiale per normalizzare la curva
+# Convertiamo i tempi in bjd_tdb_num se non l'abbiamo già fatto sopra
 bjd_median = np.median(bjd_tdb_num)
 
 from numpy.polynomial import Polynomial
-
-out_transit_selection = ((bjd_tdb_num < 2460024.3450) | (bjd_tdb_num > 2460024.4350)) & (bjd_tdb_num<2460024.4475)
-
 
 poly_ap08_ref01_deg01_pfit = Polynomial.fit(bjd_tdb_num[out_transit_selection]-bjd_median, differential_ap08_ref01[out_transit_selection], deg=1)
 poly_ap08_ref02_deg01_pfit = Polynomial.fit(bjd_tdb_num[out_transit_selection]-bjd_median, differential_ap08_ref02[out_transit_selection], deg=1)
@@ -233,6 +217,7 @@ differential_ap08_ref01_normalized = differential_ap08_ref01 / poly_ap08_ref01_d
 differential_ap08_ref02_normalized = differential_ap08_ref02 / poly_ap08_ref02_deg01_pfit(bjd_tdb_num - bjd_median)
 differential_ap08_allref_normalized = differential_ap08_allref / poly_ap08_allref_deg01_pfit(bjd_tdb_num - bjd_median)
 
+# Propagazione errore anche per la versione normalizzata:
 differential_ap08_ref01_normalized_error = differential_ap08_ref01_error / poly_ap08_ref01_deg01_pfit(bjd_tdb_num - bjd_median)
 differential_ap08_ref02_normalized_error = differential_ap08_ref02_error / poly_ap08_ref02_deg01_pfit(bjd_tdb_num - bjd_median)
 differential_ap08_allref_normalized_error = differential_ap08_allref_error / poly_ap08_allref_deg01_pfit(bjd_tdb_num - bjd_median)
@@ -244,7 +229,9 @@ plt.scatter(bjd_tdb_num-time_offset, differential_ap08_allref_normalized, s=2)
 
 plt.axvline(2460024.3450-time_offset, c='C3')
 plt.axvline(2460024.4350-time_offset, c='C3')
+plt.xlim(0.3, 0.5)
 plt.ylim(0.975, 1.025)
+
 plt.xlabel('BJD-TDB - {0:.1f} [days]'.format(time_offset))
 plt.ylabel('Normalized differential photometry')
 plt.show()
@@ -253,78 +240,7 @@ print('Standard deviation aperture 08 reference #1:    {0:.7f}'.format(np.std(di
 print('Standard deviation aperture 08 reference #2:    {0:.7f}'.format(np.std(differential_ap08_ref02_normalized[out_transit_selection])))
 print('Standard deviation aperture 08 all references : {0:.7f}'.format(np.std(differential_ap08_allref_normalized[out_transit_selection])))
 
-# Another example with different aperture
-t0 = time()
-
-aperture = 5
-inner_radius = 13
-outer_radius = 18
-
-target_ap05 = AperturePhotometry()
-target_ap05.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_target, y_target)
-target_ap05.aperture_photometry()
-
-reference01_ap05 = AperturePhotometry()
-reference01_ap05.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_reference_01, y_reference_01)
-reference01_ap05.aperture_photometry()
-
-reference02_ap05 = AperturePhotometry()
-reference02_ap05.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_reference_02, y_reference_02)
-reference02_ap05.aperture_photometry()
-
-t1 = time()
-print('elapsed_time=', t1-t0)
-
-F_t05 = target_ap05.aperture
-e_t05 = target_ap05.aperture_errors
-F_r1_05 = reference01_ap05.aperture
-e_r1_05 = reference01_ap05.aperture_errors
-F_r2_05 = reference02_ap05.aperture
-e_r2_05 = reference02_ap05.aperture_errors
-
-differential_ap05_ref01 = F_t05 / F_r1_05
-differential_ap05_ref02 = F_t05 / F_r2_05
-differential_ap05_allref = F_t05 / (F_r1_05 + F_r2_05)
-
-differential_ap05_ref01_error = differential_ap05_ref01 * np.sqrt((e_t05/F_t05)**2 + (e_r1_05/F_r1_05)**2)
-differential_ap05_ref02_error = differential_ap05_ref02 * np.sqrt((e_t05/F_t05)**2 + (e_r2_05/F_r2_05)**2)
-e_rsum_05 = np.sqrt(e_r1_05**2 + e_r2_05**2)
-F_rsum_05 = F_r1_05 + F_r2_05
-differential_ap05_allref_error = differential_ap05_allref * np.sqrt((e_t05/F_t05)**2 + (e_rsum_05/F_rsum_05)**2)
-
-# Using the same bjd_tdb and out_transit_selection as before
-poly_ap05_ref01_deg01_pfit = Polynomial.fit(bjd_tdb_num[out_transit_selection]-bjd_median,
-                                            differential_ap05_ref01[out_transit_selection], deg=1)
-poly_ap05_ref02_deg01_pfit = Polynomial.fit(bjd_tdb_num[out_transit_selection]-bjd_median,
-                                            differential_ap05_ref02[out_transit_selection], deg=1)
-poly_ap05_allref_deg01_pfit = Polynomial.fit(bjd_tdb_num[out_transit_selection]-bjd_median,
-                                             differential_ap05_allref[out_transit_selection], deg=1)
-
-differential_ap05_ref01_normalized = differential_ap05_ref01 / poly_ap05_ref01_deg01_pfit(bjd_tdb_num - bjd_median)
-differential_ap05_ref02_normalized = differential_ap05_ref02 / poly_ap05_ref02_deg01_pfit(bjd_tdb_num - bjd_median)
-differential_ap05_allref_normalized = differential_ap05_allref / poly_ap05_allref_deg01_pfit(bjd_tdb_num - bjd_median)
-
-differential_ap05_ref01_normalized_error = differential_ap05_ref01_error / poly_ap05_ref01_deg01_pfit(bjd_tdb_num - bjd_median)
-differential_ap05_ref02_normalized_error = differential_ap05_ref02_error / poly_ap05_ref02_deg01_pfit(bjd_tdb_num - bjd_median)
-differential_ap05_allref_normalized_error = differential_ap05_allref_error / poly_ap05_allref_deg01_pfit(bjd_tdb_num - bjd_median)
-
-plt.figure()
-plt.scatter(bjd_tdb_num-time_offset, differential_ap05_ref01_normalized, s=2)
-plt.scatter(bjd_tdb_num-time_offset, differential_ap05_ref02_normalized, s=2)
-plt.scatter(bjd_tdb_num-time_offset, differential_ap05_allref_normalized, s=2)
-
-plt.axvline(2460024.3450-time_offset, c='C3')
-plt.axvline(2460024.4350-time_offset, c='C3')
-plt.ylim(0.95, 1.05)
-plt.xlabel('BJD-TDB - {0:.1f} [days]'.format(time_offset))
-plt.ylabel('Normalized differential photometry')
-plt.show()
-
-print('Standard deviation aperture 05 reference #1:    {0:.7f}'.format(np.std(differential_ap05_ref01_normalized[out_transit_selection])))
-print('Standard deviation aperture 05 reference #2:    {0:.7f}'.format(np.std(differential_ap05_ref02_normalized[out_transit_selection])))
-print('Standard deviation aperture 05 all references : {0:.7f}'.format(np.std(differential_ap05_allref_normalized[out_transit_selection])))
-
-# Saving results
+# Salvataggio dei risultati
 pickle.dump(bjd_tdb_num, open('taste_bjdtdb.p','wb'))
 pickle.dump(differential_ap08_ref01_normalized, open('differential_ap08_ref01_normalized.p','wb'))
 pickle.dump(differential_ap08_ref01_normalized_error, open('differential_ap08_ref01_normalized_error.p','wb'))
@@ -333,14 +249,6 @@ pickle.dump(differential_ap08_allref_normalized_error, open('differential_ap08_a
 
 pickle.dump(differential_ap08_ref01, open('differential_ap08_ref01.p','wb'))
 pickle.dump(differential_ap08_ref01_error, open('differential_ap08_ref01_error.p','wb'))
-
 pickle.dump(differential_ap08_allref, open('differential_ap08_allref.p','wb'))
 pickle.dump(differential_ap08_allref_error, open('differential_ap08_allref_error.p','wb'))
 
-"""
-Key points of the correction:
-- Before plotting or doing arithmetic with time arrays, convert them to numerical values:
-  bjd_tdb_num = target_ap08.bjd_tdb.to_value('jd')
-- Use bjd_tdb_num instead of target_ap08.bjd_tdb directly.
-- This avoids TypeError related to passing a Time object to matplotlib or numpy arithmetic.
-"""
