@@ -1,5 +1,5 @@
 """
-4 Differential Photometry
+7 Differential Photometry
 
 In this script, we perform differential photometry using aperture photometry results obtained
 from a previously implemented AperturePhotometry class.

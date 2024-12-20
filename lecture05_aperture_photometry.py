@@ -1,5 +1,5 @@
 """
-2 Sky background subtraction and aperture photometry
+4 Sky background subtraction and aperture photometry
 """
 
 import numpy as np

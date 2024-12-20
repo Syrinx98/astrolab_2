@@ -1,5 +1,5 @@
 """
-3 Classes: Aperture Photometry Class with JD to BJD_TDB conversion and additional outputs
+6 Classes: Aperture Photometry Class with JD to BJD_TDB conversion and additional outputs
 
 In this version, we add attributes needed for plotting telescope drift and FWHM:
 - x_refined and y_refined arrays are essentially the final centroid positions of the star for each image.

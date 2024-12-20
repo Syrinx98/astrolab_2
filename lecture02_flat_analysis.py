@@ -196,7 +196,7 @@ print("\n\n2.5 Flat normalization")
 print("=============================================================================\n")
 
 """
-2.5 Flat normalization
+2 Flat normalization
 
 """
 

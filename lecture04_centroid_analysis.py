@@ -1,5 +1,5 @@
 """
-1 Centroid measurement
+4 Centroid measurement
 """
 
 import numpy as np
