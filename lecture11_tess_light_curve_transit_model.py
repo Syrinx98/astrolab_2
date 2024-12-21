@@ -122,15 +122,16 @@ from ldtk import SVOFilter, LDPSetCreator
 print("Available SVOFilter shortcuts:")
 print(SVOFilter.shortcuts)
 
-# Example filters: sloan_r and TESS
+sloan_g = SVOFilter('SLOAN/SDSS.g')
 sloan_r = SVOFilter('SLOAN/SDSS.r')
+sloan_rprime = SVOFilter('SLOAN/SDSS.rprime_filter')
 tess_fr = SVOFilter('TESS')
 
-# Plot filter profiles
-fig, ax = plt.subplots(figsize=(6, 3))
+fig, ax = plt.subplots(figsize=(6,3))
+sloan_g.plot(ax=ax)
 sloan_r.plot(ax=ax)
+sloan_rprime.plot(ax=ax)
 tess_fr.plot(ax=ax)
-ax.set_title("Filter Transmission Curves")
 fig.tight_layout()
 plt.show()
 
@@ -228,3 +229,80 @@ plt.legend()
 plt.show()
 
 print("All steps completed. The updated model with new limb darkening coefficients shows better agreement with data.")
+
+
+# =============================================================================
+# 10.6. AGGIORNAMENTO PARAMETRI QATAR-1b (SEZIONE AGGIUNTA - NON ALTERA IL CODICE SOPRA)
+# =============================================================================
+
+print("\n\n10.6. AGGIORNAMENTO PARAMETRI QATAR-1b SECONDO NUOVI DATI\n")
+
+# Creiamo un nuovo set di parametri SENZA eliminare o alterare nulla di quanto sopra:
+updated_params = batman.TransitParams()
+
+# Inseriamo i valori dalla tua 'Data Summary' per Qatar-1b:
+# (Epoca, Periodo, Rp/Rs, a/Rs, Inclinazione, Eccentricità, Argomento del periasse, Coeff. LD)
+updated_params.t0  = 2455517.9102   # Transit Epoch (BJD_TDB)
+updated_params.per = 1.420033       # Orbital Period (days)
+updated_params.rp  = 0.1455         # Rp/Rs
+updated_params.a   = 6.136          # a/Rs
+updated_params.inc = 84.48          # Inclination (deg)
+updated_params.ecc = 0.0            # Eccentricity
+updated_params.w   = 90.0           # Argument of Periastron
+updated_params.u   = [0.36, 0.24]   # Limb Darkening Coefficients (TESS)
+updated_params.limb_dark = "quadratic"
+
+print("Parametri Qatar-1b aggiornati:")
+print(f" t0  = {updated_params.t0}")
+print(f" per = {updated_params.per}")
+print(f" rp  = {updated_params.rp}")
+print(f" a   = {updated_params.a}")
+print(f" inc = {updated_params.inc}")
+print(f" ecc = {updated_params.ecc}")
+print(f" w   = {updated_params.w}")
+print(f" u   = {updated_params.u}")
+print()
+
+# Calcolo del modello con i nuovi parametri (Qatar-1b) e confronto con i dati TESS
+updated_model_tess = batman.TransitModel(updated_params, tess_bjd_tdb)
+updated_tess_flux  = updated_model_tess.light_curve(updated_params)
+
+plt.figure(figsize=(6, 4))
+plt.title("TESS Data vs Qatar-1b Model (Parametri Data Summary)")
+plt.scatter(tess_bjd_tdb, tess_normalized_flux, s=2, label='TESS data')
+plt.plot(tess_bjd_tdb, updated_tess_flux, lw=2, c='C1', label='Modello Qatar-1b')
+plt.xlabel("BJD_TDB")
+plt.ylabel("Relative flux")
+plt.legend()
+plt.show()
+
+# Creiamo il plot piegato per i nuovi parametri
+folded_tess_time_new = (tess_bjd_tdb - updated_params.t0 - updated_params.per/2.) % updated_params.per - updated_params.per/2.
+folded_range_new     = np.arange(-updated_params.per/2., updated_params.per/2., 0.001)
+
+# Prepariamo un TransitParams identico ma con t0=0 per plottare la curva piegata
+updated_params_folded = batman.TransitParams()
+updated_params_folded.t0  = 0.0
+updated_params_folded.per = updated_params.per
+updated_params_folded.rp  = updated_params.rp
+updated_params_folded.a   = updated_params.a
+updated_params_folded.inc = updated_params.inc
+updated_params_folded.ecc = updated_params.ecc
+updated_params_folded.w   = updated_params.w
+updated_params_folded.u   = updated_params.u
+updated_params_folded.limb_dark = updated_params.limb_dark
+
+updated_model_folded = batman.TransitModel(updated_params_folded, folded_range_new)
+updated_tess_folded_flux = updated_model_folded.light_curve(updated_params_folded)
+
+plt.figure(figsize=(6, 4))
+plt.title("TESS Folded Data vs Model (Qatar-1b, Data Summary)")
+plt.scatter(folded_tess_time_new, tess_normalized_flux, s=2, label='TESS folded data')
+plt.plot(folded_range_new, updated_tess_folded_flux, lw=2, c='C1', label='Folded Model')
+plt.xlim(-0.2, 0.2)
+plt.xlabel("Time from mid-transit [days]")
+plt.ylabel("Relative flux")
+plt.legend()
+plt.show()
+
+print("Fine dell'aggiornamento. Ora il modello è calibrato con i nuovi parametri di Qatar-1b.")
