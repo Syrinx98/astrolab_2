@@ -84,9 +84,8 @@ bias00_gain_comment = bias00_hdu.header.comments['GAIN']
 bias00_readout_noise = bias00_hdu.header['RDNOISE']
 bias00_ron_comment = bias00_hdu.header.comments['RDNOISE']
 print('Julian date : {0:12.6f} JD'.format(bias00_time))
-print('CCD Gain : {0:4.2f} {1:.8s}'.format(bias00_gain,bias00_gain_comment))
-print('CCD Readout noise: {0:4.2f} {1:.3s}'.format(bias00_readout_noise,bias00_ron_comment))
-print('CCD Readout noise: {0:4.2f} {1:.3s}'.format(bias00_readout_noise,bias00_ron_comment))
+print('CCD Gain : {0:4.6f} {1:.8s}'.format(bias00_gain,bias00_gain_comment))
+print('CCD Readout noise: {0:4.6f} {1:.3s}'.format(bias00_readout_noise,bias00_ron_comment))
 
 
 # =============================================================================
@@ -205,8 +204,8 @@ plt.show()
 
 starting_column= 300
 ending_column = 350
-print('Readout noise : {0:4.2f} e'.format(bias00_readout_noise))
-print('STD single frame : {0:4.2f} e'.format(np.std(bias00_data[:,starting_column:ending_column])))
+print('Readout noise : {0:4.6f} e'.format(bias00_readout_noise))
+print('STD single frame : {0:4.6f} e'.format(np.std(bias00_data[:,starting_column:ending_column])))
 """
 The values above refer to the readout noise of a single exposure. The median bias is the combination
 of 30 individual frames, so the associated error will be smaller than the one coming with a single frame.
@@ -217,9 +216,9 @@ slightly if we use the readout noise as an estimate of the error associated with
 or if we use the standard deviation of a bias frame (case 2)
 """
 expected_noise_medianbias = bias00_readout_noise/np.sqrt(n_images)
-print('1) Expected noise of median bias : {0:4.2f} e'.format(expected_noise_medianbias))
+print('1) Expected noise of median bias : {0:4.6f} e'.format(expected_noise_medianbias))
 expected_std_medianbias = np.std(bias00_data[:,starting_column:ending_column])/np.sqrt(n_images)
-print('2) Expected STD of median bias : {0:4.2f} e'.format(expected_std_medianbias))
+print('2) Expected STD of median bias : {0:4.6f} e'.format(expected_std_medianbias))
 
 
 """
@@ -232,10 +231,10 @@ principle, we could keep the entire frame.
 """
 
 measured_std_medianbias = np.std(median_bias[:,starting_column:ending_column])
-print('Measured STD of median bias : {0:4.2f} e'.format(measured_std_medianbias))
+print('Measured STD of median bias : {0:4.6f} e'.format(measured_std_medianbias))
 median_error = np.std(stack, axis=0) /np.sqrt(n_images)
 median_pixel_error = np.median(median_error)
-print('Median STD of each pixel : {0:4.2f} e'.format(median_pixel_error))
+print('Median STD of each pixel : {0:4.6f} e'.format(median_pixel_error))
 
 """
 We can see that the standard deviation computed on the median bias is slighlty higher than the
