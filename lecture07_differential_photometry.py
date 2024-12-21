@@ -70,7 +70,7 @@ vmax = np.amax(science_corrected[:,100:400])
 print('vmin:  {0:.1f}    vmax: {1:.1f}'.format(vmin, vmax))
 vmax = 5000
 
-fig, ax = plt.subplots(1, figsize=(8,3))
+fig, ax = plt.subplots(1, figsize=(8,4), dpi=300)
 im1 = plt.imshow(science_corrected, cmap=plt.colormaps['magma'],
                  norm=colors.LogNorm(vmin=vmin, vmax=vmax), origin='lower')
 plt.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
