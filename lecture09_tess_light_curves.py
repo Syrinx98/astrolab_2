@@ -22,7 +22,7 @@ In this code, we demonstrate how to:
 We assume:
 - The LC file is already in the working directory.
 - You have the sector's LC and TPF files named similarly as in the Moodle text.
-- Here we show the analysis for sector 44 only. You must repeat the process for each sector.
+- Here we show the analysis for sector 24 only. You must repeat the process for each sector.
 """
 
 import numpy as np
@@ -36,18 +36,20 @@ print("=========================================================================
 
 """
 Replace the file name with your actual LC file name if needed.
-In this example, we use sector 44:
-LC file: GJ3470_sector44_lc.fits
+In this example, we use sector 24:
+LC file: qatar1_sector24_lc.fits
 """
 
-sector44_lcf = 'GJ3470_sector44_lc.fits'
-print("Light Curve file being used:", sector44_lcf)
+tess_dir = "TESS_analysis"
+
+sector24_lcf = f"{tess_dir}/qatar_1_sector24_lc.fits"
+print("Light Curve file being used:", sector24_lcf)
 
 # Let's inspect the structure of the LC file
-fits.info(sector44_lcf)
+fits.info(sector24_lcf)
 
 # Open the LC file
-lchdu = fits.open(sector44_lcf)
+lchdu = fits.open(sector24_lcf)
 print("\nColumns in the LIGHTCURVE extension:")
 print(lchdu[1].columns)
 
@@ -132,8 +134,33 @@ plt.errorbar(time_array[conservative_selection], sap_flux[conservative_selection
 
 plt.xlabel('BJD_TDB [d]')
 plt.ylabel('e-/s')
-plt.title("TESS Lightcurve - sector 44 (conservative selection)", fontsize=12)
+plt.title("TESS Lightcurve - sector 24 (conservative selection)", fontsize=12)
 plt.legend()
+
+# ---------------------------------------------------
+# A) Calcolo delle posizioni (x) dove disegnare le 30 barre
+# ---------------------------------------------------
+min_time = np.min(time_array[conservative_selection])
+max_time = np.max(time_array[conservative_selection])
+
+# Creiamo 31 valori equispaziati (31 linee = 30 "intervalli")
+vertical_lines = np.linspace(min_time, max_time, 31)
+
+# Per posizionare le etichette in alto, prendiamo il massimo flusso
+# (o potremmo usare i limiti dell'asse y dopo il plot)
+max_flux = np.max(sap_flux[conservative_selection])
+
+# ---------------------------------------------------
+# B) Disegno delle linee e aggiunta etichette
+# ---------------------------------------------------
+for i, xline in enumerate(vertical_lines):
+    # Disegno la linea verticale
+    plt.axvline(x=xline, color='gray', linestyle='--', alpha=0.5)
+
+
+    # Stampa in console il valore di x
+    print(f"Linea n.{i+1}: x = {xline:.4f}")
+
 plt.show()
 
 # =============================================================================
@@ -144,10 +171,15 @@ print("=========================================================================
 If we notice transits or interesting features at times where data is partially excluded or 
 not good, we may manually exclude them as well.
 
-For example, let's remove data before BJD_TDB > 2459500.6 as in the example.
+For example, let's remove data before BJD_TDB > 2458981.75 as in the example.
 """
 
-final_selection = conservative_selection & (time_array > 2459500.6)
+end_plot_and_final_selection =  2458961.0912 # fino alla linea 7
+
+final_selection = conservative_selection & (time_array > end_plot_and_final_selection)
+
+print("Numero di punti in final_selection:",
+      np.sum(final_selection), "su", len(final_selection))
 
 # Plot again highlighting the manually excluded data
 plt.figure(figsize=(6,4))
@@ -166,10 +198,10 @@ plt.errorbar(time_array[conservative_selection], sap_flux[conservative_selection
 
 plt.xlabel('BJD_TDB [d]')
 plt.ylabel('e-/s')
-plt.title("TESS Lightcurve for GJ3470 - sector 44 (final selection)", fontsize=12)
+plt.title("TESS Lightcurve for qatar1 - sector 24 (final selection)", fontsize=12)
+plt.xlim(2458955.7942,  end_plot_and_final_selection)
+plt.ylim(2300, 2450)
 
-plt.xlim(2459500.15, 2459500.80)
-plt.ylim(10100, 10300)
 plt.legend()
 plt.show()
 
@@ -182,7 +214,7 @@ We save the final selected data into a pickle file for later analysis.
 Remember to repeat this process for each sector you want to analyze.
 """
 
-sector44_dictionary = {
+sector24_dictionary = {
     'time': time_array[final_selection],
     'sap_flux': sap_flux[final_selection],
     'sap_flux_error': sap_flux_error[final_selection],
@@ -190,7 +222,7 @@ sector44_dictionary = {
     'pdcsap_flux_error': pdcsap_flux_error[final_selection]
 }
 
-pickle.dump(sector44_dictionary, open('GJ3470_TESS_sector044_selected.p','wb'))
+pickle.dump(sector24_dictionary, open(f'{tess_dir}/qatar1_TESS_sector024_selected.p','wb'))
 
-print("Saved the final selected data for sector 44 in GJ3470_TESS_sector044_selected.p")
+print("Saved the final selected data for sector 24 in qatar1_TESS_sector024_selected.p")
 print("All steps completed.")
