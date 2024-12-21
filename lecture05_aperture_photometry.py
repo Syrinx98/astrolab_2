@@ -77,8 +77,8 @@ We define inner and outer radii for the annulus around the star to measure the s
 Plot the region around the star with a suitable vmax to highlight the background.
 """
 
-inner_radius = 15
-outer_radius = 22
+inner_radius = 10
+outer_radius = 18
 
 vmin = np.amin(science_corrected[:,100:400])
 vmax = np.amax(science_corrected[:,100:400])

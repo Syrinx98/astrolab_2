@@ -222,7 +222,7 @@ We compute a weighted average of pixel coordinates, weights are pixel fluxes.
 
 # Initial coordinates of the target (approximate)
 
-inner_radius = 14
+inner_radius = 10
 
 # We already have X, Y
 target_distance = np.sqrt((X-x_target)**2 + (Y-y_target)**2)
