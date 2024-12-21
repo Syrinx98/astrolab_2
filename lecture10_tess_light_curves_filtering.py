@@ -32,19 +32,21 @@ print("=========================================================================
 
 """
 We load the data from a dictionary created after quality checks and manual exclusions.
-Replace 'HATP44_TESS_sector023_selected.p' with the appropriate file for your star and sector.
+Replace 'qatar1_TESS_sector024_selected.p' with the appropriate file for your star and sector.
 """
 
-sector23_file = 'HATP44_TESS_sector023_selected.p'  # Example file name
+tess_dir = "TESS_analysis"
+
+sector23_file = f'{tess_dir}/qatar1_TESS_sector024_selected.p'
 print("Loading data from:", sector23_file)
 
-HATP44_TESS_sector023 = pickle.load(open(sector23_file, 'rb'))
+qatar1_TESS_sector024 = pickle.load(open(sector23_file, 'rb'))
 
-time = HATP44_TESS_sector023['time']
-sap_flux = HATP44_TESS_sector023['sap_flux']
-sap_flux_error = HATP44_TESS_sector023['sap_flux_error']
-pdcsap_flux = HATP44_TESS_sector023['pdcsap_flux']
-pdcsap_flux_error = HATP44_TESS_sector023['pdcsap_flux_error']
+time = qatar1_TESS_sector024['time']
+sap_flux = qatar1_TESS_sector024['sap_flux']
+sap_flux_error = qatar1_TESS_sector024['sap_flux_error']
+pdcsap_flux = qatar1_TESS_sector024['pdcsap_flux']
+pdcsap_flux_error = qatar1_TESS_sector024['pdcsap_flux_error']
 
 print("Number of data points loaded:", len(time))
 
@@ -271,7 +273,7 @@ sector23_dictionary = {
     'pdcsap_masked_hspline_w15_flux_error': pdcsap_flux_error/pdcsap_masked_hspline_w15_model,
 }
 
-output_filename = 'HATP44_TESS_sector023_filtered.p'
+output_filename = f'{tess_dir}/qatar1_TESS_sector024_filtered.p'
 pickle.dump(sector23_dictionary, open(output_filename, 'wb'))
 print("Filtered data saved in:", output_filename)
 print("All steps completed.")
