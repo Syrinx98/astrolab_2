@@ -132,25 +132,25 @@ def main():
     t0 = time()
 
     # Build the objects
-    target_ap08 = AperturePhotometry()
-    target_ap08.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_target, y_target)
-    target_ap08.aperture_photometry()
+    target = AperturePhotometry()
+    target.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_target, y_target)
+    target.aperture_photometry()
 
-    reference01_ap08 = AperturePhotometry()
-    reference01_ap08.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_reference_01, y_reference_01)
-    reference01_ap08.aperture_photometry()
+    reference01 = AperturePhotometry()
+    reference01.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_reference_01, y_reference_01)
+    reference01.aperture_photometry()
 
-    reference02_ap08 = AperturePhotometry()
-    reference02_ap08.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_reference_02, y_reference_02)
-    reference02_ap08.aperture_photometry()
+    reference02 = AperturePhotometry()
+    reference02.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_reference_02, y_reference_02)
+    reference02.aperture_photometry()
 
     t1 = time()
     print('Aperture photometry completed in {0:.2f} seconds.'.format(t1-t0))
 
     # For convenience, define a short variable for time
-    bjd_tdb = target_ap08.bjd_tdb
+    bjd_tdb = target.bjd_tdb
     time_offset = 2460024.0  # example offset to have smaller numbers on the x axis
-    normalization_index = 200  # an index for normalizing flux
+    normalization_index = 29  # an index for normalizing flux
 
     ##########################################################################
     # C) Plot raw flux, airmass, sky background, drift, FWHM
@@ -160,39 +160,39 @@ def main():
 
     # 1) Flux
     axs[0].scatter(bjd_tdb.value - time_offset,
-                   target_ap08.aperture/target_ap08.aperture[normalization_index],
+                   target.aperture/target.aperture[normalization_index],
                    s=3, label='Target')
     axs[0].scatter(bjd_tdb.value - time_offset,
-                   reference01_ap08.aperture/reference01_ap08.aperture[normalization_index],
+                   reference01.aperture/reference01.aperture[normalization_index],
                    s=3, label='Ref #1')
     axs[0].scatter(bjd_tdb.value - time_offset,
-                   reference02_ap08.aperture/reference02_ap08.aperture[normalization_index],
+                   reference02.aperture/reference02.aperture[normalization_index],
                    s=3, label='Ref #2')
     axs[0].legend()
     axs[0].set_ylabel('Normalized flux')
 
     # 2) Airmass
-    axs[1].scatter(bjd_tdb.value - time_offset, target_ap08.airmass, s=3, c='C0', label='Airmass')
+    axs[1].scatter(bjd_tdb.value - time_offset, target.airmass, s=3, c='C0', label='Airmass')
     axs[1].set_ylabel('Airmass')
 
     # 3) Sky background
-    axs[2].scatter(bjd_tdb.value - time_offset, target_ap08.sky_background, s=3, label='Target')
-    axs[2].scatter(bjd_tdb.value - time_offset, reference01_ap08.sky_background, s=3, label='Ref #1')
-    axs[2].scatter(bjd_tdb.value - time_offset, reference02_ap08.sky_background, s=3, label='Ref #2')
+    axs[2].scatter(bjd_tdb.value - time_offset, target.sky_background, s=3, label='Target')
+    axs[2].scatter(bjd_tdb.value - time_offset, reference01.sky_background, s=3, label='Ref #1')
+    axs[2].scatter(bjd_tdb.value - time_offset, reference02.sky_background, s=3, label='Ref #2')
     axs[2].set_ylabel('Sky background [photons]')
     axs[2].legend()
 
     # 4) Telescope drift
-    axs[3].scatter(bjd_tdb.value - time_offset, target_ap08.x_refined - target_ap08.x_refined[0],
+    axs[3].scatter(bjd_tdb.value - time_offset, target.x_refined - target.x_refined[0],
                    s=3, label='X drift')
-    axs[3].scatter(bjd_tdb.value - time_offset, target_ap08.y_refined - target_ap08.y_refined[0],
+    axs[3].scatter(bjd_tdb.value - time_offset, target.y_refined - target.y_refined[0],
                    s=3, label='Y drift')
     axs[3].legend()
     axs[3].set_ylabel('Drift [pix]')
 
     # 5) FWHM
-    axs[4].scatter(bjd_tdb.value - time_offset, target_ap08.x_fwhm, s=3, label='X FWHM')
-    axs[4].scatter(bjd_tdb.value - time_offset, target_ap08.y_fwhm, s=3, label='Y FWHM')
+    axs[4].scatter(bjd_tdb.value - time_offset, target.x_fwhm, s=3, label='X FWHM')
+    axs[4].scatter(bjd_tdb.value - time_offset, target.y_fwhm, s=3, label='Y FWHM')
     axs[4].legend()
     axs[4].set_ylabel('FWHM [pix]')
 
@@ -204,33 +204,33 @@ def main():
     # D) Compute differential photometry + Propagation of errors
     ##########################################################################
     #  Single references:
-    diff_ap08_ref01 = target_ap08.aperture / reference01_ap08.aperture
-    diff_ap08_ref02 = target_ap08.aperture / reference02_ap08.aperture
+    diff_ref01 = target.aperture / reference01.aperture
+    diff_ref02 = target.aperture / reference02.aperture
 
     #  Errors in ratio = ratio * sqrt( (err_target/target)^2 + (err_ref/ref)^2 )
-    diff_ap08_ref01_err = diff_ap08_ref01 * np.sqrt(
-        (target_ap08.aperture_errors/target_ap08.aperture)**2 +
-        (reference01_ap08.aperture_errors/reference01_ap08.aperture)**2
+    diff_ref01_err = diff_ref01 * np.sqrt(
+        (target.aperture_errors/target.aperture)**2 +
+        (reference01.aperture_errors/reference01.aperture)**2
     )
-    diff_ap08_ref02_err = diff_ap08_ref02 * np.sqrt(
-        (target_ap08.aperture_errors/target_ap08.aperture)**2 +
-        (reference02_ap08.aperture_errors/reference02_ap08.aperture)**2
+    diff_ref02_err = diff_ref02 * np.sqrt(
+        (target.aperture_errors/target.aperture)**2 +
+        (reference02.aperture_errors/reference02.aperture)**2
     )
 
     #  Sum of references:
-    sum_refs = reference01_ap08.aperture + reference02_ap08.aperture
-    sum_refs_err = np.sqrt(reference01_ap08.aperture_errors**2 + reference02_ap08.aperture_errors**2)
-    diff_ap08_allref = target_ap08.aperture / sum_refs
-    diff_ap08_allref_err = diff_ap08_allref * np.sqrt(
-        (target_ap08.aperture_errors/target_ap08.aperture)**2 +
+    sum_refs = reference01.aperture + reference02.aperture
+    sum_refs_err = np.sqrt(reference01.aperture_errors**2 + reference02.aperture_errors**2)
+    diff_allref = target.aperture / sum_refs
+    diff_allref_err = diff_allref * np.sqrt(
+        (target.aperture_errors/target.aperture)**2 +
         (sum_refs_err/sum_refs)**2
     )
 
     # Quick plot
     plt.figure(figsize=(8,4))
-    plt.scatter(bjd_tdb.value - time_offset, diff_ap08_ref01, s=2, label='Ref #1')
-    plt.scatter(bjd_tdb.value - time_offset, diff_ap08_ref02, s=2, label='Ref #2')
-    plt.scatter(bjd_tdb.value - time_offset, diff_ap08_allref, s=2, label='All Refs')
+    plt.scatter(bjd_tdb.value - time_offset, diff_ref01, s=2, label='Ref #1')
+    plt.scatter(bjd_tdb.value - time_offset, diff_ref02, s=2, label='Ref #2')
+    plt.scatter(bjd_tdb.value - time_offset, diff_allref, s=2, label='All Refs')
     plt.xlabel(f'BJD_TDB - {time_offset:.1f} [days]')
     plt.ylabel('Differential photometry (raw ratio)')
     plt.legend()
@@ -247,35 +247,35 @@ def main():
 
     # Fit linear polynomials
     pfit_ref01 = Polynomial.fit(bjd_tdb.value[out_transit_sel] - bjd_median,
-                                diff_ap08_ref01[out_transit_sel], deg=1)
+                                diff_ref01[out_transit_sel], deg=1)
     pfit_ref02 = Polynomial.fit(bjd_tdb.value[out_transit_sel] - bjd_median,
-                                diff_ap08_ref02[out_transit_sel], deg=1)
+                                diff_ref02[out_transit_sel], deg=1)
     pfit_all   = Polynomial.fit(bjd_tdb.value[out_transit_sel] - bjd_median,
-                                diff_ap08_allref[out_transit_sel], deg=1)
+                                diff_allref[out_transit_sel], deg=1)
 
     # Evaluate the polynomials -> normalization factor
     norm_ref01 = pfit_ref01(bjd_tdb.value - bjd_median)
     norm_ref02 = pfit_ref02(bjd_tdb.value - bjd_median)
     norm_all   = pfit_all(bjd_tdb.value - bjd_median)
 
-    diff_ap08_ref01_norm = diff_ap08_ref01 / norm_ref01
-    diff_ap08_ref02_norm = diff_ap08_ref02 / norm_ref02
-    diff_ap08_allref_norm = diff_ap08_allref / norm_all
+    diff_ref01_norm = diff_ref01 / norm_ref01
+    diff_ref02_norm = diff_ref02 / norm_ref02
+    diff_allref_norm = diff_allref / norm_all
 
     # Propagate errors for normalized curve:
     #   (target/reference)/fitted_trend -> total factor is 1 / fitted_trend
     #   so error ~ sqrt( (diff_err/fitted_trend)^2 + (diff * trend_err / trend^2 )^2 ) ...
     #   but we have not derived a formal error on the polynomial.
     # Here we just do the simplest approach ignoring polynomial fit error:
-    diff_ap08_ref01_norm_err = diff_ap08_ref01_err / norm_ref01
-    diff_ap08_ref02_norm_err = diff_ap08_ref02_err / norm_ref02
-    diff_ap08_allref_norm_err = diff_ap08_allref_err / norm_all
+    diff_ref01_norm_err = diff_ref01_err / norm_ref01
+    diff_ref02_norm_err = diff_ref02_err / norm_ref02
+    diff_allref_norm_err = diff_allref_err / norm_all
 
     # Plot the normalized differential photometry
     plt.figure()
-    plt.scatter(bjd_tdb.value, diff_ap08_ref01_norm, s=2, label='Ref #1 norm')
-    plt.scatter(bjd_tdb.value, diff_ap08_ref02_norm, s=2, label='Ref #2 norm')
-    plt.scatter(bjd_tdb.value, diff_ap08_allref_norm, s=2, label='All refs norm')
+    plt.scatter(bjd_tdb.value, diff_ref01_norm, s=2, label='Ref #1 norm')
+    plt.scatter(bjd_tdb.value, diff_ref02_norm, s=2, label='Ref #2 norm')
+    plt.scatter(bjd_tdb.value, diff_allref_norm, s=2, label='All refs norm')
 
     # 2 red lines wrt to eh BJD median
     plt.axvline(x=bjd_median - 0.5*(np.max(bjd_tdb.value) - bjd_median), c='C3')
@@ -289,9 +289,9 @@ def main():
     plt.show()
 
     # Print standard deviation outside transit
-    std_ref01 = np.std(diff_ap08_ref01_norm[out_transit_sel])
-    std_ref02 = np.std(diff_ap08_ref02_norm[out_transit_sel])
-    std_all   = np.std(diff_ap08_allref_norm[out_transit_sel])
+    std_ref01 = np.std(diff_ref01_norm[out_transit_sel])
+    std_ref02 = np.std(diff_ref02_norm[out_transit_sel])
+    std_all   = np.std(diff_allref_norm[out_transit_sel])
     print(f'Standard deviation (out of transit) Ref01: {std_ref01:.6f}')
     print(f'Standard deviation (out of transit) Ref02: {std_ref02:.6f}')
     print(f'Standard deviation (out of transit) AllRefs: {std_all:.6f}')
@@ -303,12 +303,12 @@ def main():
     pickle.dump(bjd_tdb.value, open(f'{taste_dir}/taste_bjdtdb.p', 'wb'))
 
     # Save the raw ratio
-    pickle.dump(diff_ap08_allref,         open(f'{taste_dir}/differential_ap08_allref.p','wb'))
-    pickle.dump(diff_ap08_allref_err,     open(f'{taste_dir}/differential_ap08_allref_error.p','wb'))
+    pickle.dump(diff_allref,         open(f'{taste_dir}/differential_allref.p','wb'))
+    pickle.dump(diff_allref_err,     open(f'{taste_dir}/differential_allref_error.p','wb'))
 
     # Save the normalized ratio
-    pickle.dump(diff_ap08_allref_norm,    open(f'{taste_dir}/differential_ap08_allref_normalized.p','wb'))
-    pickle.dump(diff_ap08_allref_norm_err,open(f'{taste_dir}/differential_ap08_allref_normalized_error.p','wb'))
+    pickle.dump(diff_allref_norm,    open(f'{taste_dir}/differential_allref_normalized.p','wb'))
+    pickle.dump(diff_allref_norm_err,open(f'{taste_dir}/differential_allref_normalized_error.p','wb'))
 
     print("Done. Data saved to pickle files.")
 
