@@ -32,15 +32,14 @@ We define the names of the TPF files.
 Replace these names with the actual names of your TESS TPF files if different.
 """
 
-sector44_tpf = "GJ3470_sector44_tp.fits"
-sector45_tpf = "GJ3470_sector45_tp.fits"
-sector46_tpf = "GJ3470_sector46_tp.fits"
+tess_dir = "TESS_analysis"
+
+sector24_tpf = f"{tess_dir}/qatar_1_sector24_tp.fits"
+sector25_tpf = f"{tess_dir}/qatar_1_sector25_tp.fits"
 
 # Just print some info about the files
 print("TPF files being used:")
-print("Sector 44:", sector44_tpf)
-print("Sector 45:", sector45_tpf)
-print("Sector 46:", sector46_tpf)
+print("Sector 44:", sector24_tpf)
 
 
 # =============================================================================
@@ -51,12 +50,12 @@ print("=========================================================================
 We can use fits.info to see the structure of the FITS file without loading everything.
 """
 
-fits.info(sector44_tpf)
+fits.info(sector24_tpf)
 
 # Open the TPF file
-tphdu = fits.open(sector44_tpf)
+tphdu = fits.open(sector24_tpf)
 
-print("\n\nHDU List for sector44_tpf:")
+print("\n\nHDU List for sector24_tpf:")
 print(tphdu.info())
 
 # The first extension (HDU=1) contains the PIXELS data
@@ -97,7 +96,7 @@ print("=========================================================================
 Sometimes the first image might be invalid (NaN or Inf). We loop over TIME steps until we find a valid image.
 """
 
-tphdu = fits.open(sector46_tpf)
+tphdu = fits.open(sector25_tpf)
 tpf_data = tphdu[1].data
 
 for i_check in range(len(tpf_data['TIME'])):
@@ -127,7 +126,7 @@ The aperture extension (HDU=2) contains integer bitmasks describing the status o
 We load it and print it.
 """
 
-tphdu = fits.open(sector44_tpf)
+tphdu = fits.open(sector24_tpf)
 aperture = tphdu[2].data
 print("Aperture Mask Array:")
 print(aperture)
