@@ -164,23 +164,23 @@ print('TESS LD coefficients:',
       'u2 = {0:.2f} ± {1:.2f}'.format(np.mean(u2_tess_chains), np.std(u2_tess_chains)))
 
 # Choose final LD coefficients (with some rounding)
-u1_sloan_r = 0.59
-u2_sloan_r = 0.16
-u1_tess = 0.35
-u2_tess = 0.23
+u1_sloan_r = 0.65
+u2_sloan_r = 0.08
+u1_tess = 0.51
+u2_tess = 0.10
 
 # =============================================================================
 print("\n\n 10.5. Updating the Model with Improved Limb Darkening")
 print("=============================================================================\n")
 
 params = batman.TransitParams()
-params.t0 = 2459500.53574
-params.per = 3.3366510632883
-params.rp = 0.0764
-params.a = 13.94
-params.inc = 88.9
-params.ecc = 0.
-params.w = 90.
+params.t0 = 2457475.204489  # Tempo di congiunzione inferiore (BJD_TDB) :contentReference[oaicite:0]{index=0}
+params.per = 1.420024443    # Periodo orbitale in giorni :contentReference[oaicite:1]{index=1}
+params.rp = 0.1463          # Rapporto dei raggi planetario e stellare (Rp/Rs) :contentReference[oaicite:2]{index=2}
+params.a = 6.25             # Semiasse maggiore in unità di raggi stellari (a/Rs) :contentReference[oaicite:3]{index=3}
+params.inc = 84.08          # Inclinazione orbitale in gradi :contentReference[oaicite:4]{index=4}
+params.ecc = 0.0            # Eccentricità orbitale :contentReference[oaicite:5]{index=5}
+params.w = 90.0             # Argomento del periasse in gradi (non rilevante per orbite circolari)
 
 # For TASTE:
 params.u = [u1_sloan_r, u2_sloan_r]
@@ -242,15 +242,16 @@ updated_params = batman.TransitParams()
 
 # Inseriamo i valori dalla tua 'Data Summary' per Qatar-1b:
 # (Epoca, Periodo, Rp/Rs, a/Rs, Inclinazione, Eccentricità, Argomento del periasse, Coeff. LD)
-updated_params.t0  = 2455517.9102   # Transit Epoch (BJD_TDB)
-updated_params.per = 1.420033       # Orbital Period (days)
-updated_params.rp  = 0.1455         # Rp/Rs
-updated_params.a   = 6.136          # a/Rs
-updated_params.inc = 84.48          # Inclination (deg)
+updated_params.t0  = 2457475.204489   # Transit Epoch (BJD_TDB)
+updated_params.per = 1.420024443      # Orbital Period (days)
+updated_params.rp  = 0.1463           # Rp/Rs
+updated_params.a   = 6.25            # a/Rs
+updated_params.inc = 84.08           # Inclination (deg)
 updated_params.ecc = 0.0            # Eccentricity
 updated_params.w   = 90.0           # Argument of Periastron
 updated_params.u   = [0.36, 0.24]   # Limb Darkening Coefficients (TESS)
 updated_params.limb_dark = "quadratic"
+
 
 print("Parametri Qatar-1b aggiornati:")
 print(f" t0  = {updated_params.t0}")
