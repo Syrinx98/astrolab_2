@@ -262,15 +262,3 @@ bjd_tdb = tm.tdb + ltt_bary
 
 print('Average Light travel time:                     {0:12.2f} minutes'.format(np.average(ltt_bary.to_value(u.min))))
 print('Average difference between JD_UTC and BJD_TDB: {0:12.2f} seconds'.format(np.average(jd - bjd_tdb.to_value('jd'))*86400))
-
-plt.figure(figsize=(6,4), dpi=300)
-plt.scatter(bjd_tdb, array_airmass, s=2)
-plt.xlabel('BJD_TDB')
-plt.ylabel('Airmass')
-# Aggiunta delle due linee verticali rosse
-plt.axvline(x=np.min(bjd_tdb), color='r', linestyle='--')
-plt.axvline(x=np.max(bjd_tdb), color='r', linestyle='--')
-plt.title("Airmass variation during the TASTE observation")
-
-plt.figtext(0.5, 0.01, "Fig. \\ref{sky-flux} - Airmass variation during the TASTE observation. The plot shows a Gaussian-like trend centered around 2460024.25 BJD [days]. The dashed vertical red lines indicate the start and the end of the transit. The increasing airmass towards the beginning and the end of the night, coupled with the possible presence of thin cirrus clouds, can lead to an increase in the observed sky background flux.", ha="center", fontsize=10)
-plt.show()
