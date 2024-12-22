@@ -301,7 +301,7 @@ print()
 
 # Compute the updated model (Qatar-1b) for TESS data and plot
 updated_model_tess = batman.TransitModel(updated_params, tess_bjd_tdb)
-updated_tess_flux  = updated_model_tess.light_curve(updated_params)
+updated_tess_flux  = updated_model_tessupdated_tess_flux  = updated_model_tess.light_curve(updated_params)
 
 plt.figure(figsize=(6, 4))
 plt.title("TESS Data vs Qatar-1b Model (New Parameters)")
@@ -331,14 +331,26 @@ updated_params_folded.limb_dark = updated_params.limb_dark
 updated_model_folded = batman.TransitModel(updated_params_folded, folded_range_new)
 updated_tess_folded_flux = updated_model_folded.light_curve(updated_params_folded)
 
-plt.figure(figsize=(6, 4))
-plt.title("TESS Folded Data vs Model (Qatar-1b, New Parameters)")
-plt.scatter(folded_tess_time_new, tess_normalized_flux, s=2, label='TESS folded data')
-plt.plot(folded_range_new, updated_tess_folded_flux, lw=2, c='C1', label='Folded Model')
-plt.xlim(-0.2, 0.2)
-plt.xlabel("Time from mid-transit [days]")
-plt.ylabel("Relative Flux")
-plt.legend()
+# Fig. 6: Transit light curve of Qatar-1b from the TESS data.
+fig, axs = plt.subplots(2, 1, figsize=(8, 6), dpi=300, sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+plt.suptitle("Transit Light Curve of Qatar-1b (TESS Data, New Parameters)")
+
+# Top panel: Phase-folded and flattened TESS light curve
+axs[0].scatter(folded_tess_time_new, tess_normalized_flux, s=2, label='TESS folded data', color='black')
+axs[0].plot(folded_range_new, updated_tess_folded_flux, lw=2, c='red', label='Folded Model')
+axs[0].set_xlim(-0.2, 0.2)
+axs[0].set_ylabel("Relative Flux")
+axs[0].legend()
+
+# Bottom panel: Residuals between the observed data and the best-fitting model.
+residuals = tess_normalized_flux - updated_model_tess.light_curve(updated_params)
+axs[1].scatter(folded_tess_time_new, residuals, s=2, color='black')
+axs[1].axhline(0, color='red', linestyle='--')
+axs[1].set_xlim(-0.2, 0.2)
+axs[1].set_xlabel("Time from mid-transit [days]")
+axs[1].set_ylabel("Residuals")
+
+plt.subplots_adjust(hspace=0)
 plt.show()
 
 print("End of the update. The model is now calibrated with new Qatar-1b parameters.")

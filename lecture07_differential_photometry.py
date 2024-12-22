@@ -103,7 +103,7 @@ def main():
     outer_radius = 18
 
     # Show the image and the star apertures
-    fig, ax = plt.subplots(1, figsize=(8, 4))
+    fig, ax = plt.subplots(1, figsize=(8, 4), dpi=300)
     vmin = np.amin(science_corrected[:, 100:400])
     vmax = np.amax(science_corrected[:, 100:400])
     vmax = 5000  # example to saturate the scale a bit

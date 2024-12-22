@@ -155,7 +155,7 @@ max_flux = np.max(sap_flux[conservative_selection])
 # ---------------------------------------------------
 for i, xline in enumerate(vertical_lines):
     # Disegno la linea verticale
-    plt.axvline(x=xline, color='gray', linestyle='--', alpha=0.5)
+    #plt.axvline(x=xline, color='gray', linestyle='--', alpha=0.5)
 
 
     # Stampa in console il valore di x
@@ -182,7 +182,7 @@ print("Numero di punti in final_selection:",
       np.sum(final_selection), "su", len(final_selection))
 
 # Plot again highlighting the manually excluded data
-plt.figure(figsize=(6,4))
+plt.figure(figsize=(8,4), dpi=300)
 plt.scatter(time_array[conservative_selection], sap_flux[conservative_selection],
             s=5, label='SAP - selected data')
 plt.scatter(time_array, pdcsap_flux, s=5, label='PDCSAP')

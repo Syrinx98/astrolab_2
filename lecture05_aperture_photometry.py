@@ -11,8 +11,6 @@ import time
 from matplotlib import colors
 from scipy.stats import multivariate_normal
 
-from lecture01_bias_analysis import taste_dir
-
 # =============================================================================
 print("\n\n 2.1. Read a science frame and its associated errors")
 print("=============================================================================\n")
@@ -77,7 +75,7 @@ We define inner and outer radii for the annulus around the star to measure the s
 Plot the region around the star with a suitable vmax to highlight the background.
 """
 
-inner_radius = 10
+inner_radius = 13
 outer_radius = 18
 
 vmin = np.amin(science_corrected[:,100:400])
@@ -121,19 +119,27 @@ print('Average Sky flux: {0:7.1f} photons/pixel'.format(sky_flux_average))
 print('Median Sky flux:  {0:7.1f} photons/pixel'.format(sky_flux_median))
 
 # =============================================================================
-print("\n\n HOMEWORK: Compute the associated error to the sky background")
+print("\n\n Compute the associated error to the sky background")
 print("=============================================================================\n")
 
 """
-HOMEWORK:
 1) Compute the associated error to the sky background, remembering that each pixel has an associated error.
 2) Check if median and average are consistent within errors.
 3) Decide if using the median or average makes a difference.
 """
 
-# Example (not a final solution, just a placeholder comment):
-# sky_flux_error = np.sqrt( np.sum(science_corrected_err[annulus_selection]**2) ) / np.sum(annulus_selection)
-# print('Sky flux error (example): {0:7.1f} photons/pixel'.format(sky_flux_error))
+sky_flux_error = np.sqrt( np.sum(science_corrected_err[annulus_selection]**2) ) / np.sum(annulus_selection)
+print('Sky flux error (example): {0:7.1f} photons/pixel'.format(sky_flux_error))
+
+# Plot the sky background region
+plt.figure(figsize=(8, 6))
+plt.imshow(science_corrected, cmap='viridis', origin='lower', norm=plt.Normalize(vmin=vmin, vmax=vmax))
+plt.scatter(X[annulus_selection], Y[annulus_selection], s=1, color='red', alpha=0.5)
+plt.colorbar(label='Counts')
+plt.title('Sky Background Region')
+plt.xlabel('X [pixels]')
+plt.ylabel('Y [pixels]')
+plt.show()
 
 
 # =============================================================================
@@ -142,12 +148,11 @@ print("=========================================================================
 
 """
 We can now subtract the sky background from the entire frame.
-HOMEWORK:
 Compute the error associated to the flux on each pixel after subtracting the sky level.
 """
 
 science_sky_corrected = science_corrected - sky_flux_average
-# science_sky_corrected_error = np.sqrt(science_corrected_err**2 + sky_flux_error^2) # example if sky error known
+science_sky_corrected_error = np.sqrt(science_corrected_err**2 + sky_flux_error**2)
 
 
 # =============================================================================
@@ -169,13 +174,10 @@ for ii, aperture_radius in enumerate(radius_array):
     aperture_selection = (target_distance < aperture_radius)
     flux_vs_radius[ii] = np.sum(science_sky_corrected[aperture_selection])/total_flux
 
-plt.figure()
+plt.figure(figsize=(8, 4), dpi=300)
 plt.scatter(radius_array, flux_vs_radius, c='C1')
-plt.axhline(0.80)
-plt.axhline(0.85)
-plt.axhline(0.90)
+
 plt.axhline(0.95)
-plt.axhline(0.99)
 
 plt.xlabel('Aperture [pixels]')
 plt.ylabel('Fractional flux within the aperture')
@@ -183,9 +185,8 @@ plt.title("Fraction of flux captured as a function of aperture radius")
 plt.show()
 
 """
-HOMEWORK:
-1) Identify at least two apertures for photometric analysis.
-2) Compute the error associated with each flux measurement.
+Identify at least two apertures for photometric analysis.
+Compute the error associated with each flux measurement.
 Remember: here you are summing fluxes, not taking an average. The error will propagate accordingly.
 """
 
