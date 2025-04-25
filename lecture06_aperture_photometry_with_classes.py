@@ -1,15 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-6 Classes: Aperture Photometry Class with JD to BJD_TDB conversion and additional outputs
-
+6 Classes: Aperture Photometry Class with JD → BJD_TDB conversion and additional outputs,
+plus detrending to remove linear background slope (“inclinazione”).
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as colors
 import pickle
 from astropy.io import fits
 from astropy import coordinates as coord, units as u
 from astropy.time import Time
+from astropy.coordinates import EarthLocation
 
 class AperturePhotometry:
     taste_dir = 'TASTE_analysis/group05_QATAR-1_20230212'
@@ -17,251 +19,214 @@ class AperturePhotometry:
     def __init__(self):
         # Initialization: load constants and calibration frames
         self.data_path = self.taste_dir + "/"
-
         self.readout_noise = 7.4  # [e-] photoelectrons
-        self.gain = 1.91  # [e-/ADU]
-        self.bias_std = 1.3  # [e-] photoelectrons
+        self.gain = 1.91         # [e-/ADU]
+        self.bias_std = 1.3      # [e-] photoelectrons
 
         # Load median bias and errors
+        print("Loading calibration frames...")
         self.median_bias = pickle.load(open(self.data_path + 'bias/median_bias.p', 'rb'))
         self.median_bias_errors = pickle.load(open(self.data_path + 'bias/median_bias_error.p', 'rb'))
 
         # Load median flat and errors
         self.median_normalized_flat = pickle.load(open(self.data_path + 'flat/median_normalized_flat.p', 'rb'))
         self.median_normalized_flat_errors = pickle.load(open(self.data_path + 'flat/median_normalized_flat_errors.p', 'rb'))
+        print("Calibration frames loaded.\n")
 
         # Science files
         self.science_path = self.data_path + 'science/'
         self.science_list = np.genfromtxt(self.science_path + 'science.list', dtype=str)
         self.science_size = len(self.science_list)
+        print(f"Found {self.science_size} science frames.\n")
 
         # Create meshgrid
-        ylen, xlen = np.shape(self.median_bias)
-        X_axis = np.arange(0, xlen, 1)
-        Y_axis = np.arange(0, ylen, 1)
+        ylen, xlen = self.median_bias.shape
+        X_axis = np.arange(xlen)
+        Y_axis = np.arange(ylen)
         self.X, self.Y = np.meshgrid(X_axis, Y_axis)
         self.X_axis = X_axis
         self.Y_axis = Y_axis
 
-        # Set the target coordinates and observatory location for BJD_TDB conversion
-        # (Example coordinates for qatar-1, adapt to your target star)
-        self.target = coord.SkyCoord("20:13:31.61", "+65:09:43.49", unit=(u.hourangle, u.deg), frame='icrs')
-        self.observatory_location = ('45.8472d', '11.569d')  # asiago observatory coordinates
+        # Target coords & observatory location for BJD_TDB conversion
+        self.target = coord.SkyCoord("20:13:31.61", "+65:09:43.49",
+                                     unit=(u.hourangle, u.deg), frame='icrs')
+        self.observatory_location = EarthLocation(lat=45.8472*u.deg,
+                                                  lon=11.569*u.deg)
 
-    def provide_aperture_parameters(self, sky_inner_radius, sky_outer_radius, aperture_radius, x_initial, y_initial):
+    def provide_aperture_parameters(self, sky_inner_radius, sky_outer_radius,
+                                    aperture_radius, x_initial, y_initial):
         self.sky_inner_radius = sky_inner_radius
         self.sky_outer_radius = sky_outer_radius
         self.aperture_radius = aperture_radius
         self.x_initial = x_initial
         self.y_initial = y_initial
+        print(f"Aperture params → sky_inner={sky_inner_radius}, sky_outer={sky_outer_radius}, aperture={aperture_radius}")
+        print(f"Initial guess → x0={x_initial}, y0={y_initial}\n")
 
     def correct_science_frame(self, science_frame):
-        # Correct science frame for bias and flat
-        science_debiased = science_frame - self.median_bias
-        science_corrected = science_debiased / self.median_normalized_flat
+        # Bias subtraction & flat-field correction with error propagation
+        with np.errstate(divide='ignore', invalid='ignore'):
+            debiased = science_frame - self.median_bias
+            corrected = debiased / self.median_normalized_flat
 
-        # Error computation
-        science_debiased_errors = np.sqrt(self.readout_noise**2 + self.bias_std**2 + science_debiased)
+            debias_err = np.sqrt(self.readout_noise**2 +
+                                 self.bias_std**2 +
+                                 np.abs(debiased))
 
-        valid = (science_debiased != 0) & (self.median_normalized_flat != 0)
-        science_corrected_errors = np.zeros_like(science_corrected)
-        science_corrected_errors[valid] = science_corrected[valid] * np.sqrt(
-            (science_debiased_errors[valid] / science_debiased[valid])**2 +
-            (self.median_normalized_flat_errors[valid] / self.median_normalized_flat[valid])**2
-        )
-        # For invalid pixels:
-        science_corrected_errors[~valid] = 0.0
+            valid = (debiased != 0) & (self.median_normalized_flat != 0)
+            corr_err = np.zeros_like(corrected)
+            corr_err[valid] = corrected[valid] * np.sqrt(
+                (debias_err[valid] / np.abs(debiased[valid]))**2 +
+                (self.median_normalized_flat_errors[valid] / self.median_normalized_flat[valid])**2
+            )
 
-        return science_corrected, science_corrected_errors
+            corrected[~valid] = 0.0
 
-    def compute_centroid(self, science_frame, x_target_initial, y_target_initial, maximum_number_of_iterations=20):
+        return corrected, corr_err
+
+    def compute_centroid(self, frame, x0, y0, max_iter=20, tol=0.1):
         """
-        Iteratively compute the centroid inside the sky_inner_radius.
+        Iteratively refine centroid within sky_inner_radius.
+        Returns last valid (x, y), falling back to initial if no flux.
         """
-        for i_iter in range(maximum_number_of_iterations):
-            if i_iter == 0:
-                x_target_previous = x_target_initial
-                y_target_previous = y_target_initial
-            else:
-                x_target_previous = x_target_refined
-                y_target_previous = y_target_refined
+        x_prev, y_prev = x0, y0
 
-            target_distance = np.sqrt((self.X - x_target_previous)**2 + (self.Y - y_target_previous)**2)
-            annulus_sel = (target_distance < self.sky_inner_radius)
+        for _ in range(max_iter):
+            r = np.hypot(self.X - x_prev, self.Y - y_prev)
+            sel = (r < self.sky_inner_radius)
+            flux = frame[sel]
+            total = np.sum(flux)
+            if total <= 0:
+                break
+            x_new = np.sum(flux * self.X[sel]) / total
+            y_new = np.sum(flux * self.Y[sel]) / total
 
-            weighted_X = np.sum(science_frame[annulus_sel] * self.X[annulus_sel])
-            weighted_Y = np.sum(science_frame[annulus_sel] * self.Y[annulus_sel])
-            total_flux = np.sum(science_frame[annulus_sel])
-
-            x_target_refined = weighted_X / total_flux
-            y_target_refined = weighted_Y / total_flux
-
-            # Early stopping if convergence is below 0.1%
-            percent_variance_x = (x_target_refined - x_target_previous) / x_target_previous * 100.
-            percent_variance_y = (y_target_refined - y_target_previous) / y_target_previous * 100.
-            if np.abs(percent_variance_x) < 0.1 and np.abs(percent_variance_y) < 0.1:
+            dx = abs((x_new - x_prev) / x_prev)*100 if x_prev else np.inf
+            dy = abs((y_new - y_prev) / y_prev)*100 if y_prev else np.inf
+            x_prev, y_prev = x_new, y_new
+            if dx < tol and dy < tol:
                 break
 
-        return x_target_refined, y_target_refined
+        return x_prev, y_prev
 
-    def compute_sky_background(self, science_frame, science_frame_errors, x_pos, y_pos):
-        """
-        Computes the sky background inside the annulus [sky_inner_radius, sky_outer_radius].
-        """
-        target_distance = np.sqrt((self.X - x_pos)**2 + (self.Y - y_pos)**2)
-        annulus_selection = (target_distance > self.sky_inner_radius) & (target_distance <= self.sky_outer_radius)
+    def compute_sky_background(self, frame, frame_err, x_cen, y_cen):
+        r = np.hypot(self.X - x_cen, self.Y - y_cen)
+        ann = (r > self.sky_inner_radius) & (r <= self.sky_outer_radius)
+        vals = frame[ann]
+        errs = frame_err[ann]
+        med = np.median(vals)
+        Npix = np.count_nonzero(ann)
+        err = np.sqrt(np.sum(errs**2)) / Npix if Npix else np.nan
+        return med, err
 
-        sky_flux_median = np.median(science_frame[annulus_selection])
-        N = np.sum(annulus_selection)
-        sky_flux_error = np.sqrt(np.sum(science_frame_errors[annulus_selection] ** 2)) / N
+    def determine_FWHM_axis(self, coords, cdf):
+        # Linear interpolation at ±1σ points
+        left, right = 0.15865, 0.84135
+        x_l = np.interp(left,  cdf, coords)
+        x_r = np.interp(right, cdf, coords)
+        return np.sqrt(2*np.log(2)) * (x_r - x_l)
 
-        return sky_flux_median, sky_flux_error
-
-    def determine_FWHM_axis(self, reference_axis, normalized_cumulative_distribution):
-        """
-        Determine the FWHM along one axis using the normalized cumulative distribution.
-        We approximate ±1 sigma from a Gaussian to convert to FWHM.
-        """
-        NCD_left_val  = 0.15865
-        NCD_right_val = 0.84135
-
-        NCD_index_left  = np.argmin(np.abs(normalized_cumulative_distribution - NCD_left_val))
-        NCD_index_right = np.argmin(np.abs(normalized_cumulative_distribution - NCD_right_val))
-
-        from numpy.polynomial import Polynomial
-
-        # Fit a small polynomial around these points to interpolate
-        left_range  = slice(max(NCD_index_left - 1, 0), min(NCD_index_left + 2, len(reference_axis)))
-        right_range = slice(max(NCD_index_right - 1,0), min(NCD_index_right + 2,len(reference_axis)))
-
-        p_fitted_left  = Polynomial.fit(normalized_cumulative_distribution[left_range],
-                                        reference_axis[left_range],
-                                        deg=2)
-        p_fitted_right = Polynomial.fit(normalized_cumulative_distribution[right_range],
-                                        reference_axis[right_range],
-                                        deg=2)
-
-        pixel_left  = p_fitted_left(NCD_left_val)
-        pixel_right = p_fitted_right(NCD_right_val)
-
-        # Convert ~2-sigma to FWHM:
-        FWHM_factor = 2. * np.sqrt(2. * np.log(2.))  # ~ 2.35482
-        FWHM = (pixel_right - pixel_left)/2. * FWHM_factor
-        return FWHM
-
-    def compute_fwhm(self, science_frame, x_pos, y_pos, radius):
-        """
-        Compute FWHM along X and Y directions for the star located at x_pos, y_pos.
-        We select pixels within the chosen radius and compute cumulative sums.
-        """
-        target_distance = np.sqrt((self.X - x_pos)**2 + (self.Y - y_pos)**2)
-        sel = (target_distance < radius)
-
-        total_flux = np.nansum(science_frame * sel)
-        flux_x = np.nansum(science_frame * sel, axis=0)
-        flux_y = np.nansum(science_frame * sel, axis=1)
-
-        cumulative_sum_x = np.cumsum(flux_x) / total_flux
-        cumulative_sum_y = np.cumsum(flux_y) / total_flux
-
-        FWHM_x = self.determine_FWHM_axis(self.X_axis, cumulative_sum_x)
-        FWHM_y = self.determine_FWHM_axis(self.Y_axis, cumulative_sum_y)
-
-        return FWHM_x, FWHM_y
+    def compute_fwhm(self, frame, x_cen, y_cen):
+        r = np.hypot(self.X - x_cen, self.Y - y_cen)
+        sel = (r < self.sky_inner_radius)
+        total = np.sum(frame[sel])
+        if total <= 0:
+            return np.nan, np.nan
+        fx = np.sum(frame*sel, axis=0)
+        fy = np.sum(frame*sel, axis=1)
+        cdf_x = np.cumsum(fx) / total
+        cdf_y = np.cumsum(fy) / total
+        return (self.determine_FWHM_axis(self.X_axis, cdf_x),
+                self.determine_FWHM_axis(self.Y_axis, cdf_y))
 
     def aperture_photometry(self):
-        """
-        Main routine to perform aperture photometry on each science frame.
-        Also performs JD -> BJD_TDB conversion for convenience.
-        """
-        self.airmass = np.empty(self.science_size)
-        self.exptime = np.empty(self.science_size)
-        self.julian_date = np.empty(self.science_size)
+        N = self.science_size
+        # prepare arrays
+        self.airmass = np.empty(N)
+        self.exptime = np.empty(N)
+        self.jd = np.empty(N)
+        self.aperture = np.empty(N)
+        self.aperture_errors = np.empty(N)
+        self.sky_background = np.empty(N)
+        self.sky_background_errors = np.empty(N)
+        self.x_position = np.empty(N)
+        self.y_position = np.empty(N)
+        self.x_fwhm = np.empty(N)
+        self.y_fwhm = np.empty(N)
 
-        self.aperture = np.empty(self.science_size)
-        self.aperture_errors = np.empty(self.science_size)
-        self.sky_background = np.empty(self.science_size)
-        self.sky_background_errors = np.empty(self.science_size)
+        x_ref, y_ref = self.x_initial, self.y_initial
+        print("Starting aperture photometry...\n")
+        for i, fname in enumerate(self.science_list, 1):
+            print(f"[{i}/{N}] {fname}")
+            with fits.open(self.science_path + fname) as hdul:
+                hdr  = hdul[0].header
+                data = hdul[0].data.astype(float) * self.gain
 
-        self.x_position = np.empty(self.science_size)
-        self.y_position = np.empty(self.science_size)
+            self.airmass[i-1] = hdr.get('AIRMASS', np.nan)
+            self.exptime[i-1] = hdr.get('EXPTIME', np.nan)
+            self.jd[i-1]      = hdr.get('JD',     np.nan)
 
-        # Store FWHM measurements
-        self.x_fwhm = np.empty(self.science_size)
-        self.y_fwhm = np.empty(self.science_size)
+            corr, corr_err = self.correct_science_frame(data)
+            x_ref, y_ref = self.compute_centroid(corr, x_ref, y_ref)
+            sky_m, sky_e = self.compute_sky_background(corr, corr_err, x_ref, y_ref)
+            self.sky_background[i-1], self.sky_background_errors[i-1] = sky_m, sky_e
 
-        x_ref_init = self.x_initial
-        y_ref_init = self.y_initial
+            corr_sky = corr - sky_m
+            corr_sky_err = np.sqrt(corr_err**2 + sky_e**2)
+            x_ref, y_ref = self.compute_centroid(corr_sky, x_ref, y_ref)
+            self.x_position[i-1], self.y_position[i-1] = x_ref, y_ref
 
-        for ii_science, science_name in enumerate(self.science_list):
-            science_fits = fits.open(self.science_path + science_name)
-            hdr = science_fits[0].header
-            self.airmass[ii_science] = hdr['AIRMASS']
-            self.exptime[ii_science] = hdr['EXPTIME']
-            self.julian_date[ii_science] = hdr['JD']
+            r = np.hypot(self.X - x_ref, self.Y - y_ref)
+            sel = (r < self.aperture_radius)
+            vals = corr_sky[sel]; errs = corr_sky_err[sel]
+            self.aperture[i-1] = np.sum(vals)
+            self.aperture_errors[i-1] = np.sqrt(np.sum(errs**2))
 
-            science_data = science_fits[0].data * self.gain
-            science_fits.close()
+            try:
+                fx, fy = self.compute_fwhm(corr_sky, x_ref, y_ref)
+            except Exception:
+                fx, fy = np.nan, np.nan
+            self.x_fwhm[i-1], self.y_fwhm[i-1] = fx, fy
 
-            # Correct frame
-            science_corrected, science_corrected_errors = self.correct_science_frame(science_data)
+        print("\nConverting JD → BJD_TDB...")
+        jd_mid = self.jd + (self.exptime/86400.)/2.
+        t = Time(jd_mid, format='jd', scale='utc', location=self.observatory_location)
+        ltt = t.light_travel_time(self.target, ephemeris='jpl')
+        self.bjd_tdb = t.tdb + ltt
+        print("Done.\n")
 
-            # Compute centroid before sky subtraction
-            x_refined, y_refined = self.compute_centroid(science_corrected, x_ref_init, y_ref_init)
 
-            # Compute sky background
-            sky_median, sky_error = self.compute_sky_background(science_corrected, science_corrected_errors,
-                                                                x_refined, y_refined)
-            self.sky_background[ii_science] = sky_median
-            self.sky_background_errors[ii_science] = sky_error
+if __name__ == "__main__":
+    from time import time
 
-            # Subtract sky
-            science_sky_corrected = science_corrected - sky_median
-            science_sky_corrected_errors = np.sqrt(science_corrected_errors**2 + sky_error**2)
+    # ---- Target star ----
+    t0 = time()
+    target_star = AperturePhotometry()
+    target_star.provide_aperture_parameters(13, 18, 8, 415, 73)
+    target_star.aperture_photometry()
+    print(f"Elapsed time: {time()-t0:.1f} s\n")
 
-            # Recompute centroid after sky subtraction
-            x_refined, y_refined = self.compute_centroid(science_sky_corrected, x_refined, y_refined)
+    # Raw flux vs BJD_TDB
+    bjd = target_star.bjd_tdb.value
+    flux = target_star.aperture
+    plt.figure(figsize=(10,6))
+    plt.scatter(bjd, flux, s=5, alpha=0.6)
+    plt.xlabel("BJD_TDB"); plt.ylabel("Aperture flux")
+    plt.title("Raw Aperture Photometry"); plt.grid(True); plt.tight_layout()
+    plt.show()
 
-            # Aperture photometry
-            target_distance = np.sqrt((self.X - x_refined)**2 + (self.Y - y_refined)**2)
-            aperture_selection = (target_distance < self.aperture_radius)
-            self.aperture[ii_science] = np.sum(science_sky_corrected[aperture_selection])
-            self.aperture_errors[ii_science] = np.sqrt(np.sum((science_sky_corrected_errors[aperture_selection])**2))
+    # ---- Detrending: remove linear slope via time fit ----
+    # 1) Normalize around median
+    rel_flux = flux / np.median(flux)
+    # 2) Fit and remove linear trend in time
+    coeff = np.polyfit(bjd, rel_flux, 1)
+    baseline = np.polyval(coeff, bjd)
+    detr_flux = rel_flux / baseline
 
-            self.x_position[ii_science] = x_refined
-            self.y_position[ii_science] = y_refined
-
-            # Compute FWHM
-            fwhm_x, fwhm_y = self.compute_fwhm(science_sky_corrected, x_refined, y_refined,
-                                               radius=self.sky_inner_radius)
-            self.x_fwhm[ii_science] = fwhm_x
-            self.y_fwhm[ii_science] = fwhm_y
-
-            # Update initial guess for next iteration
-            x_ref_init = x_refined
-            y_ref_init = y_refined
-
-        # Convert JD to BJD_TDB (mid exposure)
-        jd_mid = self.julian_date + self.exptime/86400./2.
-        tm = Time(jd_mid, format='jd', scale='utc', location=self.observatory_location)
-        ltt_bary = tm.light_travel_time(self.target, ephemeris='jpl')
-        self.bjd_tdb = tm.tdb + ltt_bary
-
-        # For compatibility
-        self.x_refined = self.x_position
-        self.y_refined = self.y_position
-
-# Example usage:
-from time import time
-t0 = time()
-target_star = AperturePhotometry()
-target_star.provide_aperture_parameters(13, 18, 8, 415, 73)
-target_star.aperture_photometry()
-t1 = time()
-print('elapsed_time=', t1-t0)
-
-plt.figure()
-plt.scatter(target_star.bjd_tdb.value, target_star.aperture, s=2)
-plt.xlabel("BJD_TDB")
-plt.ylabel("Aperture flux")
-plt.show()
+    # 3) Plot detrended curve
+    plt.figure(figsize=(10,6))
+    plt.scatter(bjd, detr_flux, s=5, alpha=0.6)
+    plt.axhline(1.0, color='k', linestyle='--')
+    plt.xlabel("BJD_TDB"); plt.ylabel("Normalized & Detrended Flux")
+    plt.title("Detrended Light Curve"); plt.grid(True); plt.tight_layout()
+    plt.show()
