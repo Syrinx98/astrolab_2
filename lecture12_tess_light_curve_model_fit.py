@@ -239,7 +239,20 @@ def run_mcmc(theta0, taste_bjd, diff, diff_err,
     # Use multiprocessing for speed
     with Pool() as pool:
         sampler = emcee.EnsembleSampler(nwalkers, ndim, prob_fn, pool=pool)
+        print("Starting MCMC sampling...")
         sampler.run_mcmc(p0, nsteps, progress=True)
+    
+    # Extra diagnostic prints for chain behavior
+    chain = sampler.get_chain()
+    log_probs = sampler.get_log_prob()
+    print("MCMC diagnostics:")
+    print(f"  - Chain shape: {chain.shape}")
+    print(f"  - Initial log-prob mean: {np.mean(log_probs[0]):.3f} ± {np.std(log_probs[0]):.3f}")
+    print(f"  - Final log-prob mean: {np.mean(log_probs[-1]):.3f} ± {np.std(log_probs[-1]):.3f}")
+    for i in range(ndim):
+        param_chain = chain[:,:,i]
+        print(f"Parameter {i}: mean={np.mean(param_chain):.5f}, std={np.std(param_chain):.5f}, min={np.min(param_chain):.5f}, max={np.max(param_chain):.5f}")
+
     # Debug info: acceptance fraction and autocorr time
     acc_frac = sampler.acceptance_fraction
     print(f"Mean acceptance fraction: {np.mean(acc_frac):.3f}")
@@ -250,11 +263,6 @@ def run_mcmc(theta0, taste_bjd, diff, diff_err,
     except Exception as e:
         print(f"Could not estimate autocorrelation time: {e}")
 
-    # Save sampler
-    out_path = f'{tess_dir}/emcee_sampler.p'
-    with open(out_path, 'wb') as f:
-        pickle.dump(sampler, f)
-    print(f"Sampler saved to {out_path}")
     return sampler
 
 # =============================================================================
@@ -265,10 +273,16 @@ def analyze_samples(sampler):
     Returns the flattened, thinned sample array.
     """
     print("\n[5] Analyzing MCMC chains...")
+    chain = sampler.get_chain()
+    print("Chain summary statistics by parameter:")
+    ndim = chain.shape[-1]
+    for i in range(ndim):
+        print(f"  Param {i}: min={np.min(chain[:,:,i]):.5f}, max={np.max(chain[:,:,i]):.5f}, mean={np.mean(chain[:,:,i]):.5f}, std={np.std(chain[:,:,i]):.5f}")
+
     nsteps = sampler.chain.shape[1]
     flat_samples = sampler.get_chain(discard=nsteps//4,
-                                    thin=100,
-                                    flat=True)
+                                     thin=100,
+                                     flat=True)
     print(f"  - Flat samples shape: {flat_samples.shape}")
     # Parameter summary
     print("Posterior parameter summary (median ±1σ):")
@@ -281,13 +295,6 @@ def analyze_samples(sampler):
         mcmc = np.percentile(flat_samples[:, i], [15.865, 50, 84.135])
         q = np.diff(mcmc)
         print(f"  {lab}: {mcmc[1]:.5f} -{q[0]:.5f} +{q[1]:.5f}")
-
-    # Parameter labels
-    labels = [
-        't0','per','rp','a','inc',
-        'TESS_u1','TESS_u2','TASTE_u1','TASTE_u2',
-        'poly0','poly1','poly2','jit_TESS','jit_TASTE'
-    ]
 
     # Trace plots
     fig, axes = plt.subplots(len(labels), 1, figsize=(10, 2*len(labels)), sharex=True)
