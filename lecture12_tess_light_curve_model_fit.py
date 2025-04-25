@@ -1,3 +1,20 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+MCMC Transit Fitting Script for Qatar-1b
+
+This script performs the following steps:
+1) Loads TASTE and TESS light curve data
+2) Initializes model parameters and boundaries
+3) Defines transit+trend model, likelihood, priors, and posterior
+4) Runs emcee to sample the posterior distribution
+5) Produces trace plots, corner plots, and best-fit comparison plots
+6) Computes derived physical parameters (planet radius in Jupiter radii)
+7) (Optional) Shows how to run a differential evolution optimizer for a starting point
+
+Keep file paths consistent with the author's directory structure.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
@@ -5,369 +22,430 @@ import batman
 from scipy import stats
 import emcee
 import corner
-from multiprocessing import Pool
+from multiprocessing import Pool, freeze_support
+from functools import partial
+import warnings
 
 # =============================================================================
-# Data Loading (Same as before)
+# 1) Data Loading -----------------------------------------------------------
+def load_data():
+    """
+    Load TASTE and TESS photometric data from pickle files.
+    Normalize both light curves to unit out-of-transit median.
+    Returns arrays for times, fluxes, errors, and directories.
+    """
+    print("[1] Loading data...")
+    taste_dir = 'TASTE_analysis/group05_QATAR-1_20230212'
+    tess_dir = 'TESS_analysis'
+
+    # Load TASTE data
+    taste_bjd = pickle.load(open(f'{taste_dir}/taste_bjdtdb.p', 'rb'))
+    differential_allref = pickle.load(open(f'{taste_dir}/differential_allref.p', 'rb'))
+    differential_allref_error = pickle.load(open(f'{taste_dir}/differential_allref_error.p', 'rb'))
+    # Normalize TASTE
+    median_taste = np.median(differential_allref)
+    differential_allref /= median_taste
+    differential_allref_error /= median_taste
+
+    # Load TESS data
+    tess_dict = pickle.load(open(f'{tess_dir}/qatar1_TESS_sector024_filtered.p', 'rb'))
+    tess_bjd = tess_dict['time']
+    if 'pdcsap_flat' in tess_dict:
+        tess_flux = tess_dict['pdcsap_flat']
+        tess_flux_err = tess_dict['pdcsap_err']
+    else:
+        tess_flux = tess_dict['selected_flux']
+        tess_flux_err = tess_dict['selected_flux_error']
+    # Normalize TESS
+    median_tess = np.median(tess_flux)
+    tess_flux /= median_tess
+    tess_flux_err /= median_tess
+
+    print(f"  - TASTE: {len(taste_bjd)} points (normalized)")
+    print(f"  - TESS: {len(tess_bjd)} points (normalized)")
+    print("Data loaded and normalized successfully.")
+
+    return (taste_bjd, differential_allref, differential_allref_error,
+            tess_bjd, tess_flux, tess_flux_err,
+            taste_dir, tess_dir)
+
 # =============================================================================
+# 2) Parameter and Boundary Initialization ---------------------------------
+def init_theta():
+    """
+    Provide an initial guess for the 14 model parameters:
+      0 t0, 1 per, 2 rp/Rs, 3 a/Rs, 4 inc,
+      5-6 TESS u1, u2; 7-8 TASTE u1, u2;
+      9-11 polynomial trend coeffs; 12-13 jitters.
+    """
+    print("[2] Initializing parameter guess...")
+    theta0 = np.array([
+        2457475.204489,  # t0 (BJD_TDB)
+        1.420024443,     # per (days)
+        0.1463,          # rp/Rs
+        6.25,            # a/Rs
+        84.08,           # inc (deg)
+        # Refined from empirical analysis:
+        0.515, 0.098,    # TESS limb darkening u1,u2
+        0.652, 0.078,    # TASTE (SDSS r) u1,u2
+        1.0, 0.0, 0.0,   # poly0, poly1, poly2 (trend)
+        0.001, 0.001     # jitter_TESS, jitter_TASTE
+    ])
+    print("Initial theta:", theta0)
+    return theta0
 
-print("\n\nLoading Data")
-print("========================================\n")
 
-taste_dir = "TASTE_analysis/group05_QATAR-1_20230212"
-tess_dir = "TESS_analysis"
-
-taste_bjd_tdb = pickle.load(open(f'{taste_dir}/taste_bjdtdb.p', 'rb'))
-differential_allref = pickle.load(open(f'{taste_dir}/differential_allref.p', 'rb'))
-differential_allref_error = pickle.load(open(f'{taste_dir}/differential_allref_error.p', 'rb'))
-
-tess_sector_dict = pickle.load(open(f'{tess_dir}/qatar1_TESS_sector024_filtered.p', 'rb'))
-tess_bjd_tdb = tess_sector_dict['time']
-tess_normalized_flux = tess_sector_dict['selected_flux']
-tess_normalized_ferr = tess_sector_dict['selected_flux_error']
-
-print("Data loaded successfully.")
+def init_boundaries(theta0):
+    """
+    Define physical boundaries for each parameter to avoid unphysical values.
+    Boundaries format: boundaries[0,i] = lower bound, boundaries[1,i] = upper bound.
+    """
+    print("[3] Setting parameter boundaries...")
+    npar = len(theta0)
+    bounds = np.zeros((2, npar))
+    # t0 within ±0.5 days
+    bounds[0,0], bounds[1,0] = theta0[0] - 0.5, theta0[0] + 0.5
+    # period within ±0.5 days
+    bounds[0,1], bounds[1,1] = theta0[1] - 0.5, theta0[1] + 0.5
+    # rp/Rs: physical range
+    bounds[0,2], bounds[1,2] = 0.0, 0.5
+    # a/Rs: physical range
+    bounds[0,3], bounds[1,3] = 0.0, 20.0
+    # inclination: [0,90]
+    bounds[0,4], bounds[1,4] = 0.0, 90.0
+    # limb darkening coefficients (TESS & TASTE): [0,1] for u1,u2
+    bounds[0,5:9] = 0.0
+    bounds[1,5:9] = 1.0
+    # polynomial trend coefficients: poly0 [0,1], poly1 & poly2 [-1,1]
+    bounds[0,9], bounds[1,9]   = 0.0, 1.0
+    bounds[0,10], bounds[1,10] = -1.0, 1.0
+    bounds[0,11], bounds[1,11] = -1.0, 1.0
+    # jitters: small positive
+    bounds[0,12], bounds[1,12] = 0.0, 0.05
+    bounds[0,13], bounds[1,13] = 0.0, 0.05
+    print("Boundaries set.")
+    return bounds
 
 # =============================================================================
-# Parameter Definition (Same as before)
-# =============================================================================
+# 3) Likelihood, Prior, and Posterior ---------------------------------------
 
-print("\n\nDefining Parameters and Model Setup")
-print("========================================\n")
-
-theta_initial = np.empty(14)
-theta_initial[0] = 2457475.204489  # t0 (mid-transit, BJD_TDB)
-theta_initial[1] = 1.420024443     # per (days)
-theta_initial[2] = 0.1463          # rp = Rp/Rs
-theta_initial[3] = 6.25            # a = a/Rs
-theta_initial[4] = 84.08           # inc (degrees)
-theta_initial[5] = 0.51
-theta_initial[6] = 0.10
-theta_initial[7] = 0.65
-theta_initial[8] = 0.08
-theta_initial[9] = 0.245
-theta_initial[10] = 0.0
-theta_initial[11] = 0.0
-theta_initial[12] = 0.0
-theta_initial[13] = 0.0
-
-# =============================================================================
-# Log-Likelihood Function (Same as before)
-# =============================================================================
-
-print("\n\nDefining the log_likelihood function")
-print("========================================\n")
-
-def log_likelihood(theta):
-    t0, per, rp, a, inc = theta[0:5]
-    tess_u1, tess_u2 = theta[5], theta[6]
+def log_likelihood(theta, taste_bjd, diff, diff_err, tess_bjd, tess_flux, tess_flux_err):
+    """
+    Compute the Gaussian log-likelihood combining TESS and TASTE datasets,
+    including jitter terms added in quadrature to measurement errors.
+    """
+    # Unpack parameters
+    t0, per, rp, a, inc = theta[:5]
+    tess_u1, tess_u2   = theta[5], theta[6]
     taste_u1, taste_u2 = theta[7], theta[8]
-    poly0, poly1, poly2 = theta[9], theta[10], theta[11]
-    tess_jitter, taste_jitter = theta[12], theta[13]
+    poly0, poly1, poly2= theta[9:12]
+    tess_jit, taste_jit= theta[12], theta[13]
 
+    # Set up batman transit parameters
     params = batman.TransitParams()
-    params.t0 = t0
-    params.per = per
-    params.rp = rp
-    params.a = a
-    params.inc = inc
-    params.ecc = 0.0
-    params.w = 90.0
-    params.limb_dark = "quadratic"
+    params.t0, params.per = t0, per
+    params.rp, params.a, params.inc = rp, a, inc
+    params.ecc, params.w = 0.0, 90.0
+    params.limb_dark = 'quadratic'
 
+    # TESS model light curve
     params.u = [tess_u1, tess_u2]
-    m_tess = batman.TransitModel(params, tess_bjd_tdb)
-    tess_model_flux = m_tess.light_curve(params)
+    m_tess = batman.TransitModel(params, tess_bjd)
+    model_tess = m_tess.light_curve(params)
 
+    # TASTE model + polynomial trend
     params.u = [taste_u1, taste_u2]
-    median_bjd = np.median(taste_bjd_tdb)
-    poly_trend = poly0 + poly1 * (taste_bjd_tdb - median_bjd) + poly2 * (taste_bjd_tdb - median_bjd) ** 2
-    m_taste = batman.TransitModel(params, taste_bjd_tdb)
-    taste_model_flux = m_taste.light_curve(params) * poly_trend
+    m_taste = batman.TransitModel(params, taste_bjd)
+    base_taste = m_taste.light_curve(params)
+    median_bjd = np.median(taste_bjd)
+    trend = poly0 + poly1*(taste_bjd - median_bjd) + poly2*(taste_bjd - median_bjd)**2
+    model_taste = base_taste * trend
 
-    tess_errors_with_jitter = tess_normalized_ferr ** 2 + tess_jitter ** 2
-    taste_errors_with_jitter = differential_allref_error ** 2 + taste_jitter ** 2
+    # Compute residual variances (with jitter)
+    err2_tess  = tess_flux_err**2  + tess_jit**2
+    err2_taste = diff_err**2       + taste_jit**2
 
-    chi2_tess = np.sum((tess_normalized_flux - tess_model_flux) ** 2 / tess_errors_with_jitter)
-    chi2_taste = np.sum((differential_allref - taste_model_flux) ** 2 / taste_errors_with_jitter)
+    # Chi-squared terms
+    chi2_tess  = np.sum((tess_flux - model_tess)**2 / err2_tess)
+    chi2_taste = np.sum((diff - model_taste)**2 / err2_taste)
+    ln_det = np.sum(np.log(err2_tess)) + np.sum(np.log(err2_taste))
+    Ntot = len(tess_flux) + len(diff)
 
-    N_tess = len(tess_normalized_flux)
-    N_taste = len(differential_allref)
-    N = N_tess + N_taste
+    # Full log-likelihood
+    ll = -0.5 * (Ntot * np.log(2 * np.pi) + chi2_tess + chi2_taste + ln_det)
+    return ll
 
-    sum_ln_sigma_tess = np.sum(np.log(tess_errors_with_jitter))
-    sum_ln_sigma_taste = np.sum(np.log(taste_errors_with_jitter))
-
-    logL = -0.5 * (N * np.log(2.0 * np.pi) + chi2_tess + chi2_taste + sum_ln_sigma_tess + sum_ln_sigma_taste)
-    return logL
-
-print("log_likelihood at initial guess:", log_likelihood(theta_initial))
-
-# =============================================================================
-# Priors (Same as before)
-# =============================================================================
-
-print("\n\nDefining Priors")
-print("========================================\n")
 
 def log_prior(theta):
-    tess_u1_mean, tess_u1_std = 0.51, 0.05
-    tess_u2_mean, tess_u2_std = 0.10, 0.05
-    taste_u1_mean, taste_u1_std = 0.65, 0.05
-    taste_u2_mean, taste_u2_std = 0.08, 0.05
-
+    """
+    Gaussian priors on the four limb darkening coefficients with specified means and stds.
+    All other parameters have uniform (flat) priors within their boundaries.
+    """
+    # Updated priors from lesson PDF:
+    # TESS: u1=0.35±0.10, u2=0.23±0.10
+    # TASTE: u1=0.58±0.05, u2=0.18±0.10
+    u_means = [0.515, 0.098, 0.652, 0.078]  # Empirical values from lecture11
+    u_stds  = [0.10, 0.10, 0.05, 0.10]
     lp = 0.0
-    lp += np.log(stats.norm.pdf(theta[5], loc=tess_u1_mean, scale=tess_u1_std))
-    lp += np.log(stats.norm.pdf(theta[6], loc=tess_u2_mean, scale=tess_u2_std))
-    lp += np.log(stats.norm.pdf(theta[7], loc=taste_u1_mean, scale=taste_u1_std))
-    lp += np.log(stats.norm.pdf(theta[8], loc=taste_u2_mean, scale=taste_u2_std))
+    for i in range(4):
+        lp += stats.norm.logpdf(theta[5+i], loc=u_means[i], scale=u_stds[i])
     return lp
 
-# =============================================================================
-# Boundaries (Same as before)
-# =============================================================================
 
-print("\n\nDefining Boundaries and log_probability")
-print("========================================\n")
-
-boundaries = np.empty((2, 14))
-boundaries[:, 0] = [theta_initial[0] - 0.5, theta_initial[0] + 0.5]
-boundaries[:, 1] = [theta_initial[1] - 0.5, theta_initial[1] + 0.5]
-boundaries[:, 2] = [0.0, 0.5]
-boundaries[:, 3] = [0.0, 20.0]
-boundaries[:, 4] = [0.0, 90.0]
-boundaries[:, 5] = [0.0, 1.0]
-boundaries[:, 6] = [0.0, 1.0]
-boundaries[:, 7] = [0.0, 1.0]
-boundaries[:, 8] = [0.0, 1.0]
-boundaries[:, 9] = [0.0, 1.0]
-boundaries[:, 10] = [-1.0, 1.0]
-boundaries[:, 11] = [-1.0, 1.0]
-boundaries[:, 12] = [0.0, 0.05]
-boundaries[:, 13] = [0.0, 0.05]
-
-def log_probability(theta):
-    if np.any(theta < boundaries[0, :]) or np.any(theta > boundaries[1, :]):
+def log_probability(theta, taste_bjd, diff, diff_err,
+                    tess_bjd, tess_flux, tess_flux_err,
+                    boundaries):
+    """
+    Computes log-prior + log-likelihood if theta within boundaries; otherwise -inf.
+    """
+    # Boundary check
+    lower, upper = boundaries
+    if np.any(theta < lower) or np.any(theta > upper):
         return -np.inf
+
     lp = log_prior(theta)
     if not np.isfinite(lp):
         return -np.inf
-    ll = log_likelihood(theta)
+
+    ll = log_likelihood(theta, taste_bjd, diff, diff_err,
+                        tess_bjd, tess_flux, tess_flux_err)
     if not np.isfinite(ll):
         return -np.inf
+
     return lp + ll
 
-print("log_probability at initial guess:", log_probability(theta_initial))
-
 # =============================================================================
-# MCMC Setup (Same as before)
-# =============================================================================
+# 4) Run MCMC ----------------------------------------------------------------
+def run_mcmc(theta0, taste_bjd, diff, diff_err,
+             tess_bjd, tess_flux, tess_flux_err,
+             tess_dir, boundaries):
+    """
+    Set up and run the emcee EnsembleSampler, saving the sampler object.
+    """
+    print("\n[4] Running MCMC with emcee...")
+    ndim = theta0.size
+    nwalkers = 50  # ≥ 2×ndim
+    nsteps   = 5000
 
-print("\n\nRunning the MCMC Sampler with emcee")
-print("========================================\n")
+    # Initialize walkers in a small ball around theta0
+    p0 = theta0 + 1e-4 * np.random.randn(nwalkers, ndim)
 
-def run_mcmc(theta_initial, boundaries, nwalkers=50, nsteps=20000, filename=f'{tess_dir}/emcee_sampler_first_run.p'):
-    ndim = len(theta_initial)
-    starting_point = theta_initial + 1e-5 * np.random.randn(nwalkers, ndim)
+    # Partial function to pass fixed data and boundaries
+    prob_fn = partial(log_probability,
+                      taste_bjd=taste_bjd, diff=diff, diff_err=diff_err,
+                      tess_bjd=tess_bjd, tess_flux=tess_flux, tess_flux_err=tess_flux_err,
+                      boundaries=boundaries)
 
+    # Use multiprocessing for speed
     with Pool() as pool:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, pool=pool)
-        sampler.run_mcmc(starting_point, nsteps, progress=True)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, prob_fn, pool=pool)
+        sampler.run_mcmc(p0, nsteps, progress=True)
+    # Debug info: acceptance fraction and autocorr time
+    acc_frac = sampler.acceptance_fraction
+    print(f"Mean acceptance fraction: {np.mean(acc_frac):.3f}")
+    print(f"Acceptance fraction per walker: {acc_frac}")
+    try:
+        tau = sampler.get_autocorr_time()
+        print(f"Autocorrelation times: {tau}")
+    except Exception as e:
+        print(f"Could not estimate autocorrelation time: {e}")
 
-    with open(filename, 'wb') as f:
+    # Save sampler
+    out_path = f'{tess_dir}/emcee_sampler.p'
+    with open(out_path, 'wb') as f:
         pickle.dump(sampler, f)
-    print(f"MCMC run completed and results saved to '{filename}'.")
+    print(f"Sampler saved to {out_path}")
+    return sampler
 
-if __name__ == "__main__":
-    run_mcmc(theta_initial, boundaries)
+# =============================================================================
+# 5) Analyze Samples ---------------------------------------------------------
+def analyze_samples(sampler):
+    """
+    Generate trace plots and corner plot of the posterior samples.
+    Returns the flattened, thinned sample array.
+    """
+    print("\n[5] Analyzing MCMC chains...")
+    nsteps = sampler.chain.shape[1]
+    flat_samples = sampler.get_chain(discard=nsteps//4,
+                                    thin=100,
+                                    flat=True)
+    print(f"  - Flat samples shape: {flat_samples.shape}")
+    # Parameter summary
+    print("Posterior parameter summary (median ±1σ):")
+    labels = [
+        't0','per','rp','a','inc',
+        'TESS_u1','TESS_u2','TASTE_u1','TASTE_u2',
+        'poly0','poly1','poly2','jit_TESS','jit_TASTE'
+    ]
+    for i, lab in enumerate(labels):
+        mcmc = np.percentile(flat_samples[:, i], [15.865, 50, 84.135])
+        q = np.diff(mcmc)
+        print(f"  {lab}: {mcmc[1]:.5f} -{q[0]:.5f} +{q[1]:.5f}")
 
-    # =============================================================================
-    # MCMC Analysis
-    # =============================================================================
-
-    print("\n\nAnalyzing the MCMC Results")
-    print("========================================\n")
-
-    with open(f'{tess_dir}/emcee_sampler_first_run.p', 'rb') as f:
-        sampler = pickle.load(f)
-
-    burn_in = 2500
-    thinning = 100
-    flat_samples = sampler.get_chain(discard=burn_in, thin=thinning, flat=True)
-    print("Flat samples shape:", flat_samples.shape)
-
-    param_names = [
-        "t0", "per", "rp", "a", "inc",
-        "TESS_u1", "TESS_u2", "TASTE_u1", "TASTE_u2",
-        "poly0", "poly1", "poly2",
-        "jitter_TESS", "jitter_TASTE"
+    # Parameter labels
+    labels = [
+        't0','per','rp','a','inc',
+        'TESS_u1','TESS_u2','TASTE_u1','TASTE_u2',
+        'poly0','poly1','poly2','jit_TESS','jit_TASTE'
     ]
 
-    # =============================================================================
-    # Trace Plots
-    # =============================================================================
-
-    print("\n\nPlotting Trace Plots")
-    print("========================================\n")
-
-    fig, axes = plt.subplots(len(param_names), figsize=(10, 2 * len(param_names)), sharex=True)
-    for i in range(len(param_names)):
-        ax = axes[i]
-        ax.plot(sampler.get_chain(discard=burn_in, thin=thinning)[:, :, i], "k", alpha=0.3)
-        ax.set_xlim(0, sampler.get_chain(discard=burn_in, thin=thinning).shape[0])
-        ax.set_ylabel(param_names[i])
-        ax.yaxis.set_label_coords(-0.1, 0.5)
-    axes[-1].set_xlabel("Step number")
-    plt.suptitle("Trace Plots of Model Parameters")
+    # Trace plots
+    fig, axes = plt.subplots(len(labels), 1, figsize=(10, 2*len(labels)), sharex=True)
+    for i, lab in enumerate(labels):
+        axes[i].plot(sampler.get_chain()[:,:,i], 'k', alpha=0.3)
+        axes[i].set_ylabel(lab, fontsize=10)
+        axes[i].tick_params(labelsize=8)
+    axes[-1].set_xlabel('Step', fontsize=12)
+    plt.tight_layout()
     plt.show()
 
-    # =============================================================================
-    # Corner Plot
-    # =============================================================================
-
-    print("\n\nPlotting Corner Plot")
-    print("========================================\n")
-
-    fig = corner.corner(
-        flat_samples,
-        labels=param_names,
-        show_titles=True,
-        quantiles=[0.16, 0.5, 0.84],
-        title_fmt=".5f",
-        title_kwargs={"fontsize": 12}
-    )
-    fig.suptitle("Corner Plot of Posterior Distributions", fontsize=16)
+    # Corner plot
+    fig = corner.corner(flat_samples, labels=labels,
+                        show_titles=True, title_fmt='.3f', label_kwargs={'fontsize':10})
     plt.show()
 
-    # =============================================================================
-    # Parameter Summary
-    # =============================================================================
+    return flat_samples
 
-    print("\n\nParameter Summary")
-    print("========================================\n")
+# =============================================================================
+# 6) Best-Fit Model Comparison and Additional Plots -------------------------
+def plot_best_fit(theta_best, taste_bjd, differential_allref,
+                  tess_bjd, tess_flux, tess_flux_err):
+    """
+    Plot the best-fit transit model over the TESS and TASTE data,
+    and produce a phase-folded light curve for TESS.
+    """
+    print("\n[6] Generating best-fit plots...")
+    # Unpack best-fit parameters
+    params = batman.TransitParams()
+    params.t0, params.per = theta_best[0], theta_best[1]
+    params.rp, params.a, params.inc = theta_best[2], theta_best[3], theta_best[4]
+    params.ecc, params.w = 0.0, 90.0
+    params.limb_dark = 'quadratic'
+    params.u = theta_best[5:7]
 
-    for i in range(len(theta_initial)):
-        mcmc = np.percentile(flat_samples[:, i], [15.865, 50.0, 84.135])
-        q = np.diff(mcmc)
-        print(f"{param_names[i]}: {mcmc[1]:.7f} -{q[0]:.7f} +{q[1]:.7f}")
+    # TESS model
+    m_tess = batman.TransitModel(params, tess_bjd)
+    model_tess = m_tess.light_curve(params)
 
-    # =============================================================================
-    # Best-Fit Model and Plots
-    # =============================================================================
+    # Plot TESS data + model
+    plt.figure(figsize=(8,4))
+    plt.errorbar(tess_bjd, tess_flux, yerr=tess_flux_err,
+                 fmt='.', ms=2, label='TESS data', alpha=0.6)
+    plt.plot(tess_bjd, model_tess, 'r-', lw=1.5, label='Best-fit model')
+    plt.xlabel('BJD_TDB', fontsize=12)
+    plt.ylabel('Relative flux', fontsize=12)
+    plt.legend(fontsize=10)
+    plt.tight_layout()
+    plt.show()
 
-    print("\n\nExtracting Best-Fit Model and Comparing with Data")
-    print("========================================\n")
+    # Phase-folded TESS
+    phase = ((tess_bjd - params.t0 + 0.5*params.per) % params.per) - 0.5*params.per
+    sorted_idx = np.argsort(phase)
+    phase_sorted = phase[sorted_idx]
+    flux_sorted = tess_flux[sorted_idx]
 
+    plt.figure(figsize=(8,4))
+    plt.scatter(phase, tess_flux, s=2, alpha=0.5)
+    plt.plot(phase_sorted, model_tess[sorted_idx], 'r-', lw=1.5)
+    plt.xlim(-0.2, 0.2)
+    plt.xlabel('Phase [days from mid-transit]', fontsize=12)
+    plt.ylabel('Relative flux', fontsize=12)
+    plt.tight_layout()
+    plt.show()
+
+    # TASTE model + trend
+    params.u = theta_best[7:9]
+    m_taste = batman.TransitModel(params, taste_bjd)
+    base_taste = m_taste.light_curve(params)
+    median_bjd = np.median(taste_bjd)
+    trend = theta_best[9] + theta_best[10]*(taste_bjd-median_bjd) + theta_best[11]*(taste_bjd-median_bjd)**2
+    model_taste = base_taste * trend
+
+    # Plot TASTE data + model
+    plt.figure(figsize=(8,4))
+    plt.scatter(taste_bjd, differential_allref, s=2, alpha=0.5, label='TASTE data')
+    plt.plot(taste_bjd, model_taste, 'r-', lw=1.5, label='Best-fit model')
+    plt.xlabel('BJD_TDB', fontsize=12)
+    plt.ylabel('Relative flux', fontsize=12)
+    plt.legend(fontsize=10)
+    plt.tight_layout()
+    plt.show()
+
+# =============================================================================
+# 7) Derived Physical Parameters -------------------------------------------
+def derive_physical_params(flat_samples):
+    """
+    Compute planet radius in Jupiter radii using posterior samples
+    and a distribution for the stellar radius.
+    """
+    print("\n[7] Computing derived physical parameters...")
+    # Scaled planet radius samples
+    Rp_Rs = flat_samples[:,2]
+    n_samples = len(Rp_Rs)
+    # Stellar radius distribution: 0.48 ± 0.04 R_sun
+    r_star = np.random.normal(0.48, 0.04, size=n_samples)  # in R_sun
+    # Convert to Jupiter radii: R_sun/R_jup ≈ 695700 km / 71492 km
+    conv = 695700/71492
+    Rp = Rp_Rs * r_star * conv
+
+    mean_Rp = np.mean(Rp)
+    std_Rp  = np.std(Rp)
+    print(f"Planet radius: {mean_Rp:.3f} ± {std_Rp:.3f} R_jup")
+
+# =============================================================================
+# Main execution ------------------------------------------------------------
+if __name__ == "__main__":
+    freeze_support()
+
+    # Load data
+    (taste_bjd, differential_allref, differential_allref_error,
+     tess_bjd, tess_flux, tess_flux_err,
+     taste_dir, tess_dir) = load_data()
+
+    # Initialize parameters and boundaries
+    theta0 = init_theta()
+    boundaries = init_boundaries(theta0)
+
+    # Quick check of initial log-probability
+    initial_lp = log_probability(theta0,
+                                 taste_bjd, differential_allref, differential_allref_error,
+                                 tess_bjd, tess_flux, tess_flux_err,
+                                 boundaries)
+    print(f"Initial log-probability: {initial_lp:.2f}")
+    initial_ll = log_likelihood(theta0,
+                                taste_bjd, differential_allref, differential_allref_error,
+                                tess_bjd, tess_flux, tess_flux_err)
+    initial_pr = log_prior(theta0)
+    print(f"  -> log-likelihood: {initial_ll:.2f}")
+    print(f"  -> log-prior:      {initial_pr:.2f}")
+
+    # Run MCMC
+    sampler = run_mcmc(theta0,
+                       taste_bjd, differential_allref, differential_allref_error,
+                       tess_bjd, tess_flux, tess_flux_err,
+                       tess_dir, boundaries)
+
+    # Analyze samples
+    flat_samples = analyze_samples(sampler)
+
+    # Best-fit comparison plots
     theta_best = np.median(flat_samples, axis=0)
-    print("Best-fit parameters (median of posterior):", theta_best)
+    plot_best_fit(theta_best,
+                  taste_bjd, differential_allref,
+                  tess_bjd, tess_flux, tess_flux_err)
 
-    params_best = batman.TransitParams()
-    params_best.t0 = theta_best[0]
-    params_best.per = theta_best[1]
-    params_best.rp = theta_best[2]
-    params_best.a = theta_best[3]
-    params_best.inc = theta_best[4]
-    params_best.ecc = 0.0
-    params_best.w = 90.0
-    params_best.limb_dark = "quadratic"
+    # Compute derived parameters
+    derive_physical_params(flat_samples)
 
-    params_best.u = [theta_best[5], theta_best[6]]
-    m_tess_best = batman.TransitModel(params_best, tess_bjd_tdb)
-    tess_flux_model_best = m_tess_best.light_curve(params_best)
+    print("\nAll steps completed successfully.")
 
-    params_best.u = [theta_best[7], theta_best[8]]
-    median_bjd = np.median(taste_bjd_tdb)
-    poly_trend_best = (
-        theta_best[9]
-        + theta_best[10] * (taste_bjd_tdb - median_bjd)
-        + theta_best[11] * (taste_bjd_tdb - median_bjd) ** 2
-    )
-    m_taste_best = batman.TransitModel(params_best, taste_bjd_tdb)
-    taste_flux_model_best = m_taste_best.light_curve(params_best) * poly_trend_best
-
-    plt.figure(figsize=(10, 6))
-    plt.scatter(taste_bjd_tdb, differential_allref, s=2, label='TASTE data', color='black')
-    plt.plot(taste_bjd_tdb, taste_flux_model_best, lw=2, c='C1', label='Best-fit model')
-    plt.xlabel("BJD TDB")
-    plt.ylabel("Relative flux")
-    plt.legend()
-    plt.title("TASTE Data with Best-Fit Model")
-    plt.show()
-
-    plt.figure(figsize=(10, 6))
-    plt.scatter(tess_bjd_tdb, tess_normalized_flux, s=2, label='TESS data', color='black')
-    plt.plot(tess_bjd_tdb, tess_flux_model_best, lw=2, c='C1', label='Best-fit model')
-    plt.xlabel("BJD TDB")
-    plt.ylabel("Relative flux")
-    plt.legend()
-    plt.title("TESS Data with Best-Fit Model")
-    plt.show()
-
-    # =============================================================================
-    # Folded Light Curve with Residuals
-    # =============================================================================
-
-    print("\n\nPlotting Folded Light Curve with Residuals")
-    print("========================================\n")
-
-    folded_tess_time_new = (tess_bjd_tdb - theta_best[0] - theta_best[1] / 2.) % theta_best[1] - theta_best[1] / 2.
-    folded_range_new = np.arange(-theta_best[1] / 2., theta_best[1] / 2., 0.001)
-
-    best_params_folded = batman.TransitParams()
-    best_params_folded.t0 = 0.0
-    best_params_folded.per = theta_best[1]
-    best_params_folded.rp = theta_best[2]
-    best_params_folded.a = theta_best[3]
-    best_params_folded.inc = theta_best[4]
-    best_params_folded.ecc = 0.0
-    best_params_folded.w = 90.0
-    best_params_folded.u = [theta_best[5], theta_best[6]]
-    best_params_folded.limb_dark = "quadratic"
-
-    best_model_folded = batman.TransitModel(best_params_folded, folded_range_new)
-    best_tess_folded_flux = best_model_folded.light_curve(best_params_folded)
-
-    fig, axs = plt.subplots(2, 1, figsize=(8, 6), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
-    plt.suptitle("Transit Light Curve of Qatar-1b (TESS Data, Best fit parameters)")
-
-    axs[0].scatter(folded_tess_time_new, tess_normalized_flux, s=2, label='TESS folded data', color='black')
-    axs[0].plot(folded_range_new, best_tess_folded_flux, lw=2, c='red', label='Folded Model')
-    axs[0].set_xlim(-0.2, 0.2)
-    axs[0].set_ylabel("Relative Flux")
-    axs[0].legend()
-
-    residuals = tess_normalized_flux - m_tess_best.light_curve(params_best)
-    axs[1].scatter(folded_tess_time_new, residuals, s=2, color='black')
-    axs[1].axhline(0, color='red', linestyle='--')
-    axs[1].set_xlim(-0.2, 0.2)
-    axs[1].set_xlabel("Time from mid-transit [days]")
-    axs[1].set_ylabel("Residuals")
-
-    plt.subplots_adjust(hspace=0)
-    plt.show()
-
-    # =============================================================================
-    # Physical Parameter Derivation (Same as before)
-    # =============================================================================
-
-    print("\n\nDeriving Physical Parameters (Example: Planet Radius)")
-    print("========================================\n")
-
-    Rp_Rs_samples = flat_samples[:, 2]
-    n_samples = len(Rp_Rs_samples)
-
-    r_star_mean = 0.48
-    r_star_std = 0.04
-    r_star_samples = np.random.normal(r_star_mean, r_star_std, n_samples)
-
-    R_sun_km = 695700.0
-    R_jup_km = 71492.0
-    factor_sun_to_jup = R_sun_km / R_jup_km
-
-    Rp_jup = r_star_samples * Rp_Rs_samples * factor_sun_to_jup
-
-    Rp_mean = np.mean(Rp_jup)
-    Rp_std = np.std(Rp_jup)
-    print(f"Planet radius [Rjup]: mean = {Rp_mean:.6f}, std = {Rp_std:.6f}")
-
-    print("All steps completed successfully.")
+    # -------------------------------------------------------------------------
+    # Optional: differential evolution for starting point (commented out)
+    # from pyde.de import DiffEvol
+    # de = DiffEvol(lambda th: log_probability(th, taste_bjd, differential_allref,
+    #                                         differential_allref_error,
+    #                                         tess_bjd, tess_flux, tess_flux_err,
+    #                                         boundaries), boundaries.T, nwalkers=50, maximize=True)
+    # de.optimize(10000)
+    # starting_point = de.population
+    # -------------------------------------------------------------------------

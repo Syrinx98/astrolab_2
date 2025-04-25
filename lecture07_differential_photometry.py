@@ -199,6 +199,19 @@ def main():
     err_all = diff_all * np.sqrt((target.aperture_errors/target.aperture)**2 +
                                   (sum_err/sum_ref)**2)
 
+    # --------------------------------------------------------------
+    # E) Save results to pickle files
+    # --------------------------------------------------------------
+    print("Saving differential photometry to pickle files...")
+    pickle.dump(bjd, open(f'{taste_dir}/taste_bjdtdb.p', 'wb'))
+    pickle.dump(diff1, open(f'{taste_dir}/differential_ref1.p', 'wb'))
+    pickle.dump(err1, open(f'{taste_dir}/differential_ref1_error.p', 'wb'))
+    pickle.dump(diff2, open(f'{taste_dir}/differential_ref2.p', 'wb'))
+    pickle.dump(err2, open(f'{taste_dir}/differential_ref2_error.p', 'wb'))
+    pickle.dump(diff_all, open(f'{taste_dir}/differential_allrefs.p', 'wb'))
+    pickle.dump(err_all, open(f'{taste_dir}/differential_allrefs_error.p', 'wb'))
+
+
     # D′.1: Ref #1
     plt.figure(figsize=(8,4), dpi=150)
     plt.scatter(bjd-offset, diff1, s=4, label='Ref #1')
@@ -310,6 +323,8 @@ def main():
     print(f'STD 5px Ref #1: {std5_1:.7f}')
     print(f'STD 5px Ref #2: {std5_2:.7f}')
     print(f'STD 5px Both: {std5_all:.7f}')
+
+
 
 
 if __name__ == '__main__':

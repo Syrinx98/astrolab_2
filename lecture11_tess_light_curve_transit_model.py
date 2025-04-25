@@ -149,4 +149,16 @@ plt.plot(phase, flux_fold, 'C1-', label='Model')
 plt.xlim(-0.2,0.2)
 plt.xlabel("Phase [d]"); plt.ylabel("Relative flux"); plt.legend(); plt.tight_layout(); plt.show()
 
+# New Section: Print parameters for next MCMC analysis
+print("\nParameters available for MCMC analysis:")
+print(f"t0: {params.t0}")
+print(f"Period: {params.per}")
+print(f"Radius ratio (rp): {params.rp}")
+print(f"Scaled semi-major axis (a): {params.a}")
+print(f"Inclination (inc): {params.inc}")
+print(f"Eccentricity (ecc): {params.ecc}")
+print(f"Argument of periastron (w): {params.w}")
+print(f"Limb darkening coefficients (u): {params.u}")
+print(f"Limb darkening law: {params.limb_dark}")
+
 print("All steps completed.")
