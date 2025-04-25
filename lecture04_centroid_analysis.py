@@ -1,412 +1,326 @@
 """
-4 Centroid measurement
+Script for Centroid Measurement and Photometric Analysis
+Based on Lecture 04: Centroid Measurement
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as colors
+from matplotlib.colors import LogNorm
 import pickle
-from astropy.io import fits
 import time
-from matplotlib import colors
+from astropy.io import fits  # for FITS support if needed
 
 # =============================================================================
-print("\n\n 1.1. Read the first science frame and identify the target and reference stars")
-print("=============================================================================\n")
-
-"""
-Centroid measurement
-
-We start by reading one image from the reduced and corrected science frames.
-The frame used is the first of the test list.
-
-We'll identify the target star and reference star positions approximately, 
-then refine their positions.
-"""
-
+# 1.1 Read and display the first corrected science frame
+# =============================================================================
+print("\n\n1.1 Reading the first corrected science frame...")
 taste_dir = 'TASTE_analysis/group05_QATAR-1_20230212'
+# Load list of science frames
+science_list = np.genfromtxt(f'{taste_dir}/science/science.list', dtype=str)
+print(f"Found {len(science_list)} science frames")
 
-# Read the list of science frames
-science_list = np.genfromtxt(f'{taste_dir}/science/science.list', dtype='str')
-science_test_list = science_list[:10]
-science_frame_name = f'{taste_dir}/correct/' + science_test_list[0][:-5] + '_corr.p'
-science_corrected = pickle.load(open(science_frame_name, 'rb'))
+# Use first frame for testing
+test_list = science_list[:10]
+first_frame = test_list[0]
+corr_file = f'{taste_dir}/correct/{first_frame[:-5]}_corr.p'
+print(f"Loading corrected frame: {corr_file}")
+science = pickle.load(open(corr_file, 'rb'))
+print(f"Frame shape: {science.shape}")
 
-# Estimate vmin and vmax for plotting
-vmin = np.amin(science_corrected[:,100:400])
-vmax = np.amax(science_corrected[:,100:400])
-print('vmin:  {0:.1f}    vmax: {1:.1f}'.format(vmin, vmax))
-vmax = 5000
+# Estimate display limits on a central strip
+vmin = np.min(science[:, 100:400])
+vmax = np.max(science[:, 100:400])
+print(f"Estimated vmin={vmin:.1f}, vmax={vmax:.1f}")
+# Override vmax for better contrast
+vmax_display = 5000
 
-fig, ax = plt.subplots(1, figsize=(8,3))
-im1 = plt.imshow(science_corrected, cmap=plt.colormaps['magma'],
-                 norm=colors.LogNorm(vmin=vmin, vmax=vmax), origin='lower')
-plt.colorbar(im1,ax=ax, fraction=0.046, pad=0.04)
-plt.xlabel(' X [pixels]')
-plt.ylabel(' Y [pixels]')
-plt.title("Initial frame for star identification")
-plt.show()
-
-# Approximate coordinates identified by inspecting the image
-x_target = 416
-y_target = 74
-
-x_reference_01 = 298
-y_reference_01 = 107
-
-print("Approximate target coordinates: x={0}, y={1}".format(x_target, y_target))
-print("Approximate reference star coordinates: x={0}, y={1}".format(x_reference_01, y_reference_01))
-
-# =============================================================================
-print("\n\n 1.2. Drawing circles around the identified stars")
-print("=============================================================================\n")
-
-"""
-We use a helper function to draw circles around stars to refine the coordinates.
-"""
-
-def make_circle_around_star(x_pos, y_pos, label='', color='w'):
-    from matplotlib.patches import Circle
-    n, radii = 50, [9, 15]
-    theta = np.linspace(0, 2*np.pi, n, endpoint=True)
-    xs = np.outer(radii, np.cos(theta))
-    ys = np.outer(radii, np.sin(theta))
-    xs[1,:] = xs[1,::-1]
-    ys[1,:] = ys[1,::-1]
-    ax.fill(np.ravel(xs)+x_pos, np.ravel(ys)+y_pos, edgecolor=None, facecolor=color, alpha=0.75, label=label)
-
-
-fig, ax = plt.subplots(1, figsize=(8,3))
-im1 = plt.imshow(science_corrected, cmap=plt.colormaps['magma'],
-                 norm=colors.LogNorm(vmin=vmin, vmax=vmax), origin='lower')
-plt.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-make_circle_around_star(x_target, y_target, label='Target', color='w')
-make_circle_around_star(x_reference_01, y_reference_01, label='Reference #1', color='y')
-plt.xlabel(' X [pixels]')
-plt.ylabel(' Y [pixels]')
-ax.legend()
-plt.title("Refining the approximate coordinates")
-plt.show()
-
-# =============================================================================
-print("\n\n 1.3. Photocenter determination of the target star")
-print("=============================================================================\n")
-
-"""
-We define another function to make a ring around the star and then plot again.
-We will then proceed to do a 3D plot around the star to inspect its shape.
-"""
-
-def make_ring_around_star(x_pos, y_pos, label='', color='w'):
-    from matplotlib.patches import Circle
-    n, radii = 50, [9, 15]
-    theta = np.linspace(0, 2*np.pi, n, endpoint=True)
-    xs = np.outer(radii, np.cos(theta))
-    ys = np.outer(radii, np.sin(theta))
-    xs[1,:] = xs[1,::-1]
-    ys[1,:] = ys[1,::-1]
-    ax.fill(np.ravel(xs)+x_pos, np.ravel(ys)+y_pos, edgecolor=None, facecolor=color, alpha=0.75, label=label)
-
-# Redoing the plot with rings
-vmin = np.amin(science_corrected[:,100:400])
-vmax = np.amax(science_corrected[:,100:400])
-print('vmin:  {0:.1f}    vmax: {1:.1f}'.format(vmin, vmax))
-vmax = 5000
-
-fig, ax = plt.subplots(1, figsize=(8,3))
-im1 = plt.imshow(science_corrected, cmap=plt.colormaps['magma'],
-                 norm=colors.LogNorm(vmin=vmin, vmax=vmax), origin='lower')
-plt.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-make_ring_around_star(x_target, y_target, label='Target', color='w')
-make_ring_around_star(x_reference_01, y_reference_01, label='Reference #1', color='y')
-plt.xlabel(' X [pixels]')
-plt.ylabel(' Y [pixels]')
-ax.legend()
-plt.title("Target and Reference star with rings")
-plt.show()
-
-# =============================================================================
-print("\n\n 1.4. Making a 3D plot of the target star region to understand flux distribution")
-print("=============================================================================\n")
-
-ylen, xlen  = np.shape(science_corrected)
-print('Shape of our science frame: {0:d} x {1:d}'.format(xlen, ylen))
-X_axis = np.arange(0, xlen, 1)
-Y_axis = np.arange(0, ylen, 1)
-X, Y = np.meshgrid(X_axis, Y_axis)
-
-fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-surf = ax.plot_surface(X, Y, science_corrected, cmap=plt.colormaps['magma'],
-                       norm=colors.LogNorm(vmin=vmin, vmax=vmax),
-                       linewidth=0, antialiased=False)
-fig.colorbar(surf, shrink=0.5, aspect=5)
-plt.title("3D plot of the entire frame (not very informative)")
-plt.show()
-
-# A closer look around the target star
-print("\nZooming around the target star with a more suitable vmax and radius...")
-vmax= 20000
-radius_plot = 15
-
-fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-surf = ax.plot_surface(X[y_target-radius_plot:y_target+radius_plot, x_target-radius_plot:x_target+radius_plot],
-                       Y[y_target-radius_plot:y_target+radius_plot, x_target-radius_plot:x_target+radius_plot],
-                       science_corrected[y_target-radius_plot:y_target+radius_plot, x_target-radius_plot:x_target+radius_plot],
-                       cmap=plt.colormaps['magma'], norm=colors.LogNorm(vmin=vmin, vmax=vmax),
-                       linewidth=0, antialiased=False)
-
-ax.azim = 40 # viewing azimuth
-ax.elev = 30 # viewing elevation
+fig, ax = plt.subplots(figsize=(8, 4))
+im = ax.imshow(
+    science,
+    origin='lower',
+    cmap='magma',
+    norm=LogNorm(vmin=vmin, vmax=vmax_display)
+)
+cbar = fig.colorbar(im, ax=ax)
+cbar.set_label('Flux [counts]')
 ax.set_xlabel('X [pixels]')
 ax.set_ylabel('Y [pixels]')
-ax.zaxis.set_rotate_label(False)
-ax.set_zlabel('photoelectrons', rotation=90)
+ax.set_title('Initial science frame (logarithmic scale)')
+plt.tight_layout()
+plt.show()
 
-fig.colorbar(surf, shrink=0.5, aspect=15, ticks=[10, 100, 1000, 10000, 100000])
-plt.title("3D zoom around target star")
+# Approximate star positions by eye
+x_target, y_target = 416, 74
+x_ref1, y_ref1 = 298, 107
+x_ref2, y_ref2 = 117, 40
+print(f"Approximate target coordinates: x={x_target}, y={y_target}")
+print(f"Approximate reference star: x={x_ref1}, y={y_ref1}")
+print(f"Approximate reference star: x={x_ref2}, y={y_ref2}")
+
+# =============================================================================
+# 1.2 Draw circles around target and reference for initial identification
+# =============================================================================
+from matplotlib.patches import Circle
+
+def draw_circle(ax, x0, y0, radius, color, label=None):
+    """Draws a circle centered at (x0, y0) with given radius."""
+    circ = Circle((x0, y0), radius, edgecolor=color, facecolor='none', linewidth=1.5)
+    ax.add_patch(circ)
+    if label:
+        ax.scatter([], [], c=color, label=label)
+
+print("\n\n1.2 Plotting initial regions for star identification...")
+fig, ax = plt.subplots(figsize=(8, 4))
+im = ax.imshow(
+    science,
+    origin='lower',
+    cmap='magma',
+    norm=LogNorm(vmin=vmin, vmax=vmax_display)
+)
+cbar = fig.colorbar(im, ax=ax)
+cbar.set_label('Flux [counts]')
+# Draw 9-pixel circles around the stars
+draw_circle(ax, x_target, y_target, 9, 'white', 'Target (9 px)')
+draw_circle(ax, x_ref1, y_ref1, 9, 'yellow', 'Reference star (9 px)')
+draw_circle(ax, x_ref2, y_ref2, 9, 'cyan', 'Reference star (9 px)')
+ax.set_xlabel('X [pixels]')
+ax.set_ylabel('Y [pixels]')
+ax.set_title('Initial star regions')
+ax.legend(loc='upper right', framealpha=0.8)
+plt.tight_layout()
 plt.show()
 
 # =============================================================================
-print("\n\n 1.5. Using meshgrid to accelerate computations")
-print("=============================================================================\n")
+# 1.3 Create annulus and 3D surface plots to inspect flux distribution
+# =============================================================================
+def draw_annulus(ax, x0, y0, inner_r, outer_r, color, alpha=0.5, label=None):
+    """Draws an annulus between inner_r and outer_r at (x0, y0)."""
+    theta = np.linspace(0, 2*np.pi, 200)
+    radii = np.array([inner_r, outer_r])
+    xs = np.outer(radii, np.cos(theta)) + x0
+    ys = np.outer(radii, np.sin(theta)) + y0
+    for i in range(len(radii)-1):
+        ax.fill(xs[i:i+2], ys[i:i+2], facecolor=color, edgecolor='none', alpha=alpha)
+    if label:
+        ax.scatter([], [], c=color, label=label)
 
-"""
-We will measure the performance of two methods to compute the distance of each pixel from the star:
-1) A double 'for' loop over x and y.
-2) Using meshgrid arrays directly.
+print("\n\n1.3 Drawing annulus around target and generating 3D plots...")
+# 2D annulus plot
+fig, ax = plt.subplots(figsize=(8, 4))
+im = ax.imshow(
+    science,
+    origin='lower',
+    cmap='magma',
+    norm=LogNorm(vmin=vmin, vmax=vmax_display)
+)
+cbar = fig.colorbar(im, ax=ax)
+cbar.set_label('Flux [counts]')
+draw_annulus(ax, x_target, y_target, 9, 15, 'white', alpha=0.5, label='Annulus 9–15 px')
+ax.set_xlabel('X [pixels]')
+ax.set_ylabel('Y [pixels]')
+ax.set_title('Annulus for centroid computation')
+ax.legend(loc='upper right', framealpha=0.8)
+plt.tight_layout()
+plt.show()
 
-We use time.time() to measure execution times.
-"""
+# 3D surface of full frame
+print("\n3D flux distribution of the entire frame...")
+y_len, x_len = science.shape
+X, Y = np.meshgrid(np.arange(x_len), np.arange(y_len))
+fig = plt.figure(figsize=(6, 4))
+ax3d = fig.add_subplot(111, projection='3d')
+surf = ax3d.plot_surface(
+    X, Y, science,
+    cmap='magma', norm=LogNorm(vmin=vmin, vmax=vmax_display),
+    linewidth=0, antialiased=False
+)
+fig.colorbar(surf, ax=ax3d).set_label('Flux [counts]')
+ax3d.set_title('3D flux distribution (full frame)')
+ax3d.set_xlabel('X [pixels]')
+ax3d.set_ylabel('Y [pixels]')
+ax3d.set_zlabel('Flux')
+plt.tight_layout()
+plt.show()
 
-t0 = time.time()
-print('Seconds passed since January 1, 1970, 00:00:00 (UTC): {0:.4f}'.format(t0))
-t1 = time.time()
-delta_time = t1 - t0
-print('Time spent to print the previous information: {0:f} seconds'.format(delta_time))
-
-# First method (no meshgrid)
-t0 = time.time()
-rr_method01 = np.zeros_like(science_corrected)
-for yi in range(0,np.shape(science_corrected)[0]):
-    for xi in range (0, np.shape(science_corrected)[1]):
-        rr_method01[yi, xi] =  np.sqrt((xi - x_target)**2 + (yi - y_target)**2)
-
-t1 = time.time()
-total_method01 = t1-t0
-print('Time required by the first method: {0:f} seconds'.format(total_method01))
-
-# Second method (using meshgrid)
-t0 = time.time()
-X_axis = np.arange(0, xlen, 1)
-Y_axis = np.arange(0, ylen, 1)
-X, Y = np.meshgrid(X_axis, Y_axis)
-t1 = time.time()
-rr_method02 = np.sqrt((X - x_target)**2 + (Y - y_target)**2)
-t2 = time.time()
-
-prepare_method02 = t1-t0
-total_method02 = t2-t1
-print('Time required to set up the second algorithm: {0:f} seconds'.format(prepare_method02))
-print('Time required by second algorithm:            {0:f} seconds'.format(total_method02))
-print('Algorithm using meshgrid is {0:.0f} times faster'.format(total_method01/total_method02))
+# 3D zoom around target
+print("\nZoomed 3D around target star...")
+zoom_r = 15
+vmax_zoom = 20000
+sub = science[y_target-zoom_r:y_target+zoom_r, x_target-zoom_r:x_target+zoom_r]
+Xs, Ys = np.meshgrid(
+    np.arange(x_target-zoom_r, x_target+zoom_r),
+    np.arange(y_target-zoom_r, y_target+zoom_r)
+)
+fig = plt.figure(figsize=(6, 4))
+axz = fig.add_subplot(111, projection='3d')
+surf2 = axz.plot_surface(
+    Xs, Ys, sub,
+    cmap='magma', norm=LogNorm(vmin=vmin, vmax=vmax_zoom),
+    linewidth=0, antialiased=False
+)
+fig.colorbar(surf2, ax=axz).set_label('Flux [counts]')
+axz.view_init(elev=30, azim=40)
+axz.set_title('3D zoom on target')
+axz.set_xlabel('X [pixels]')
+axz.set_ylabel('Y [pixels]')
+axz.set_zlabel('Flux')
+plt.tight_layout()
+plt.show()
 
 # =============================================================================
-print("\n\n 1.6. Centroid algorithm: Weighted centroid computation")
-print("=============================================================================\n")
+# 1.5 Use meshgrid to accelerate distance computation and time performance
+# =============================================================================
+print("\n\n1.5 Comparing distance computation methods...")
+# Print epoch time and elapsed
+t0 = time.time()
+print(f"Current time (s since epoch): {t0:.4f}")
+t1 = time.time()
+print(f"Time to print: {t1 - t0:.6f} s")
 
-"""
-We now define a weighted centroid algorithm. 
-We pick an inner_radius that includes the star's flux and some background.
-We compute a weighted average of pixel coordinates, weights are pixel fluxes.
-"""
+# Method 1: nested loops
+t0 = time.perf_counter()
+rr_loops = np.zeros_like(science, dtype=float)
+for yi in range(y_len):
+    for xi in range(x_len):
+        rr_loops[yi, xi] = np.hypot(xi - x_target, yi - y_target)
+elapsed_loops = time.perf_counter() - t0
+print(f"Nested loops: {elapsed_loops:.4f} s")
 
-# Initial coordinates of the target (approximate)
+# Method 2: vectorized meshgrid
+t0 = time.perf_counter()
+rr_mesh = np.hypot(X - x_target, Y - y_target)
+elapsed_mesh = time.perf_counter() - t0
+print(f"Meshgrid method: {elapsed_mesh:.4f} s")
+print(f"Speedup: {elapsed_loops/elapsed_mesh:.1f}x")
 
+# =============================================================================
+# 1.6 Weighted centroid calculation and radius validation
+# =============================================================================
+print("\n\n1.6 Weighted centroid and radius check...")
 inner_radius = 10
+mask = rr_mesh < inner_radius
+flux_vals = science[mask]
+# Weighted sums
+wx = (X[mask] * flux_vals).sum()
+wy = (Y[mask] * flux_vals).sum()
+total = flux_vals.sum()
+x_cent = wx / total
+y_cent = wy / total
+print(f"Weighted centroid: x={x_cent:.2f}, y={y_cent:.2f}")
 
-# We already have X, Y
-target_distance = np.sqrt((X-x_target)**2 + (Y-y_target)**2)
-annulus_sel = (target_distance < inner_radius)
-
-weighted_X = np.sum(science_corrected[annulus_sel]*X[annulus_sel])
-weighted_Y = np.sum(science_corrected[annulus_sel]*Y[annulus_sel])
-total_flux = np.sum(science_corrected[annulus_sel])
-
-x_target_refined = weighted_X/total_flux
-y_target_refined = weighted_Y/total_flux
-
-print('Initial coordinates  x: {0:5.2f}   y: {1:5.2f}'.format(x_target, y_target))
-print('Refined coordinates  x: {0:5.2f}   y: {1:5.2f}'.format(x_target_refined, y_target_refined))
-
-# Checking good vs bad inner radius visually
-def make_circle_around_star(x_pos, y_pos, radius, thickness=0.5, label='', color='w', alpha=1.):
-    from matplotlib.patches import Circle
-    n, radii = 50, [radius, radius+thickness]
-    theta = np.linspace(0, 2*np.pi, n, endpoint=True)
-    xs = np.outer(radii, np.cos(theta))
-    ys = np.outer(radii, np.sin(theta))
-    xs[1,:] = xs[1,::-1]
-    ys[1,:] = ys[1,::-1]
-    ax.fill(np.ravel(xs)+x_pos, np.ravel(ys)+y_pos, edgecolor=None, facecolor=color, alpha=alpha, label=label)
-
-vmin = np.amin(science_corrected[:,100:400])
-vmax = np.amax(science_corrected[:,100:400])
-print('vmin:  {0:.1f}    vmax: {1:.1f}'.format(vmin, vmax))
-vmax = 2*vmin
-
-fig, ax = plt.subplots(1, figsize=(5,5))
-im1 = plt.imshow(science_corrected, cmap=plt.colormaps['magma'],
-                 norm=colors.LogNorm(vmin=vmin, vmax=vmax), origin='lower')
-plt.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-plt.xlim(x_target_refined-inner_radius*1.2, x_target_refined+inner_radius*1.2)
-plt.ylim(y_target_refined-inner_radius*1.2, y_target_refined+inner_radius*1.2)
-
-make_circle_around_star(x_target_refined, y_target_refined, inner_radius, label='Good inner radius')
-make_circle_around_star(x_target_refined, y_target_refined, 9, color='y', label='Bad inner radius')
-
-plt.xlabel(' X [pixels]')
-plt.ylabel(' Y [pixels]')
-plt.legend(loc='upper left')
-plt.title("Inner radius visualization")
+# Visualize good vs bad inner radius
+print("Visual comparison of inner radii...")
+fig, ax = plt.subplots(figsize=(5, 5))
+im = ax.imshow(
+    science, origin='lower', cmap='magma', norm=LogNorm(vmin=vmin, vmax=vmax_display)
+)
+cbar = fig.colorbar(im, ax=ax); cbar.set_label('Flux [counts]')
+draw_circle(ax, x_cent, y_cent, inner_radius, 'white', 'Good radius (10 px)')
+draw_circle(ax, x_cent, y_cent, 9, 'yellow', 'Bad radius (9 px)')
+ax.set_xlim(x_cent-15, x_cent+15)
+ax.set_ylim(y_cent-15, y_cent+15)
+ax.set_title('Inner radius validation for centroid')
+ax.legend(loc='upper right', framealpha=0.8)
+plt.tight_layout()
 plt.show()
 
 # =============================================================================
-print("\n\n 1.7. Iterative centroid approach to check convergence")
-print("=============================================================================\n")
-
-"""
-We run the centroid algorithm multiple times, using the refined coordinates as starting point 
-for the next iteration, until convergence or maximum number of iterations is reached.
-"""
-
-x_target_initial = 416
-y_target_initial = 74
-maximum_number_of_iterations = 30
-
-print('Initial coordinates  x: {0:5.2f}   y: {1:5.2f}'.format(x_target_initial, y_target_initial))
-
-for i_iter in range(0, maximum_number_of_iterations):
-    if i_iter == 0:
-        x_target_previous = x_target_initial
-        y_target_previous = y_target_initial
-    else:
-        x_target_previous = x_target_refined
-        y_target_previous = y_target_refined
-
-    target_distance = np.sqrt((X-x_target_previous)**2 + (Y-y_target_previous)**2)
-    annulus_sel = (target_distance < inner_radius)
-
-    weighted_X = np.sum(science_corrected[annulus_sel]*X[annulus_sel])
-    weighted_Y = np.sum(science_corrected[annulus_sel]*Y[annulus_sel])
-    total_flux = np.sum(science_corrected[annulus_sel])
-
-    x_target_refined = weighted_X/total_flux
-    y_target_refined = weighted_Y/total_flux
-
-    percent_variance_x = (x_target_refined - x_target_previous)/x_target_previous * 100.
-    percent_variance_y = (y_target_refined - y_target_previous)/y_target_previous * 100.
-
-    print('    Iteration {0:3d}   x: {1:.3f} ({2:.2f}%)  y: {3:.3f} ({4:.2f}%)'.format(i_iter,
-                                                                                     x_target_refined,
-                                                                                     percent_variance_x,
-                                                                                     y_target_refined,
-                                                                                     percent_variance_y))
-    if np.abs(percent_variance_x)<0.1 and  np.abs(percent_variance_y)<0.1:
+# 1.7 Iterative centroid refinement
+# =============================================================================
+print("\n\n1.7 Iterative refinement of centroid...")
+max_iter = 30
+tol = 0.1  # percent change tolerance
+x_prev, y_prev = x_cent, y_cent
+for i in range(max_iter):
+    mask = np.hypot(X - x_prev, Y - y_prev) < inner_radius
+    flux_vals = science[mask]
+    x_new = (X[mask] * flux_vals).sum() / flux_vals.sum()
+    y_new = (Y[mask] * flux_vals).sum() / flux_vals.sum()
+    dxp = (x_new - x_prev)/x_prev*100
+    dyp = (y_new - y_prev)/y_prev*100
+    print(f"Iter {i:2d}: x={x_new:.3f} ({dxp:.2f}%), y={y_new:.3f} ({dyp:.2f}%)")
+    if abs(dxp) < 0.1 and abs(dyp) < 0.1:
+        print("Convergence achieved")
         break
+    x_prev, y_prev = x_new, y_new
 
-print('Refined coordinates  x: {0:5.2f}   y: {1:5.2f}'.format(x_target_refined, y_target_refined))
-
-vmin = np.amin(science_corrected[:,100:400])
-vmax = np.amax(science_corrected[:,100:400])
-print('vmin:  {0:.1f}    vmax: {1:.1f}'.format(vmin, vmax))
-vmax = 2*vmin
-
-fig, ax = plt.subplots(1, figsize=(5,5))
-im1 = plt.imshow(science_corrected, cmap=plt.colormaps['magma'],
-                 norm=colors.LogNorm(vmin=vmin, vmax=vmax), origin='lower')
-plt.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-plt.xlim(x_target_refined-inner_radius*1.2, x_target_refined+inner_radius*1.2)
-plt.ylim(y_target_refined-inner_radius*1.2, y_target_refined+inner_radius*1.2)
-
-make_circle_around_star(x_target_refined, y_target_refined, inner_radius, label='inner radius')
-ax.scatter(x_target_initial, y_target_initial, c='C2', label='Starting point')
-ax.scatter(x_target_refined, y_target_refined, c='k', label='Final point')
-
-plt.xlabel(' X [pixels]')
-plt.ylabel(' Y [pixels]')
-plt.legend(loc='upper left')
-plt.title("Convergence of the centroid position")
+# Convergence path plot
+fig, ax = plt.subplots(figsize=(5, 5))
+im = ax.imshow(
+    science, origin='lower', cmap='magma', norm=LogNorm(vmin=vmin, vmax=vmax_display)
+)
+cbar = fig.colorbar(im, ax=ax); cbar.set_label('Flux [counts]')
+draw_circle(ax, x_prev, y_prev, inner_radius, 'white', 'Final centroid (10 px)')
+ax.plot([x_cent, x_prev], [y_cent, y_prev], 'o-', color='cyan', label='Centroid path')
+ax.set_xlim(x_prev-15, x_prev+15)
+ax.set_ylim(y_prev-15, y_prev+15)
+ax.set_title('Centroid convergence')
+ax.legend(loc='upper right', framealpha=0.8)
+plt.tight_layout()
 plt.show()
 
-# =============================================================================
-print("\n\n 1.8. Measuring the Full Width Half Maximum (FWHM)")
-print("=============================================================================\n")
+# --- 1.8 FWHM measurement via cumulative distribution, FIXED ---
+print("\n\n1.8 FWHM measurement via cumulative distribution...")
 
-"""
-We now measure how 'large' the star is. We compute the normalized cumulative distribution of flux 
-along X and Y axes around the star and from that we determine the FWHM.
+# 1) Ensure no hidden NaNs/masked‐array issues:
+if isinstance(science, np.ma.MaskedArray):
+    img = science.filled(0)
+else:
+    img = np.nan_to_num(science, nan=0.0, posinf=0.0, neginf=0.0)
 
-We assume no sky subtraction for now, just to show the method.
-"""
+# 2) Build mask around your final centroid:
+mask = np.hypot(X - x_prev, Y - y_prev) < inner_radius
 
-target_distance = np.sqrt((X - x_target_refined)**2 + (Y - y_target_refined)**2)
-annulus_sel = (target_distance < inner_radius)
+# 3) Masked flux WITHOUT any invalid multiplies:
+flux_masked = np.where(mask, img, 0.0)
 
-# sums
-total_flux = np.nansum(science_corrected*annulus_sel)
-flux_x = np.nansum(science_corrected*annulus_sel, axis=0)
-flux_y = np.nansum(science_corrected*annulus_sel, axis=1)
+# 4) Sum along each axis
+flux_x = flux_masked.sum(axis=0)
+flux_y = flux_masked.sum(axis=1)
 
-cumulative_sum_x = np.cumsum(flux_x)/total_flux
-cumulative_sum_y = np.cumsum(flux_y)/total_flux
+# 5) Sanity check: make sure there's actually flux
+total_x = flux_x.sum()
+total_y = flux_y.sum()
+if total_x <= 0 or total_y <= 0:
+    raise RuntimeError(f"Zero (or negative) total flux! "
+                       f"X‐sum={total_x}, Y‐sum={total_y}. "
+                       "Check centroid or inner_radius.")
 
-plt.figure()
-plt.scatter(X_axis - x_target_refined, cumulative_sum_x, label='NCD along the X axis')
-plt.scatter(Y_axis - y_target_refined, cumulative_sum_y, label='NCD along the Y axis')
-plt.axvline(0, c='k')
-plt.xlim(-inner_radius*1.3, inner_radius*1.3)
-plt.axvline(inner_radius, c='C5', label='Inner radius')
-plt.axvline(-inner_radius, c='C5')
-plt.xlabel('Distance from the photocenter [pixels]')
-plt.ylabel('Normalized cumulative distribution [NCD]')
-plt.legend()
-plt.title("Normalized cumulative distributions")
+# 6) Normalized cumulative distributions
+cum_x = np.cumsum(flux_x) / total_x
+cum_y = np.cumsum(flux_y) / total_y
+
+# 7) Distances from centroid
+dist_x = np.arange(x_len) - x_prev
+dist_y = np.arange(y_len) - y_prev
+
+# 8) Plot if you like…
+plt.figure(figsize=(6,4))
+plt.plot(dist_x, cum_x, '.', label='NCD X-axis')
+plt.plot(dist_y, cum_y, '.', label='NCD Y-axis')
+for r in (+inner_radius, -inner_radius):
+    plt.axvline(r, color='red', linestyle='--')
+plt.axvline(0, color='k')
+plt.xlabel('Distance from centroid [px]')
+plt.ylabel('Normalized Cumulative Distribution')
+plt.legend(loc='best')
+plt.tight_layout()
 plt.show()
 
-def determine_FWHM_axis(reference_axis, normalized_cumulative_distribution):
-    # -1 sigma corresponds approximately to 0.15865 in the cumulative of a gaussian
-    # +1 sigma corresponds to 0.84135
-    NCD_index_left = np.argmin(np.abs(normalized_cumulative_distribution-0.15865))
-    NCD_index_right = np.argmin(np.abs(normalized_cumulative_distribution-0.84135))
+# 9) Compute FWHM
+def compute_fwhm(axis, ncd):
+    left  = np.interp(0.15865, ncd, axis)
+    right = np.interp(0.84135, ncd, axis)
+    # right - left = 2·σ, FWHM = 2·√(2 ln 2)·σ
+    return np.sqrt(2 * np.log(2)) * (right - left)
 
-    # Fit small polynomials to get more precise estimates
-    p_fitted_left = np.polynomial.Polynomial.fit(normalized_cumulative_distribution[NCD_index_left-1: NCD_index_left+2],
-                                                 reference_axis[NCD_index_left-1: NCD_index_left+2],
-                                                 deg=2)
-    pixel_left = p_fitted_left(0.15865)
+fwhm_x = compute_fwhm(dist_x, cum_x)
+fwhm_y = compute_fwhm(dist_y, cum_y)
+print(f"FWHM: X = {fwhm_x:.2f} px,  Y = {fwhm_y:.2f} px")
 
-    p_fitted_right = np.polynomial.Polynomial.fit(normalized_cumulative_distribution[NCD_index_right-1: NCD_index_right+2],
-                                                  reference_axis[NCD_index_right-1: NCD_index_right+2],
-                                                  deg=2)
-    pixel_right = p_fitted_right(0.84135)
-
-    FWHM_factor = 2 * np.sqrt(2 * np.log(2)) # = 2.35482
-    FWHM = (pixel_right - pixel_left)/2. * FWHM_factor
-
-    return FWHM
-
-FWHM_x = determine_FWHM_axis(X_axis, cumulative_sum_x)
-FWHM_y = determine_FWHM_axis(Y_axis, cumulative_sum_y)
-
-print('FWHM along the X axis: {0:.2f}'.format(FWHM_x))
-print('FWHM along the Y axis: {0:.2f}'.format(FWHM_y))
-
-# From the fits header of the first image (given):
-# CCDSCALE= 0.25 arcsec/px unbinned
-# BINX=4 and BINY=4 (4x4 binning)
-seeing_x = FWHM_x * 4 * 0.25
-seeing_y = FWHM_y * 4 * 0.25
-print('Seeing along the X axis (after defocusing): {0:.2f} arcsec'.format(seeing_x))
-print('Seeing along the Y axis (after defocusing): {0:.2f} arcsec'.format(seeing_y))
-
-# End of the code
+# 10) Finally convert to arcsec
+bin_factor = 4
+scale = 0.25  # arcsec per unbinned pixel
+seeing_x = fwhm_x * bin_factor * scale
+seeing_y = fwhm_y * bin_factor * scale
+print(f"Estimated seeing: X = {seeing_x:.2f}\"  Y = {seeing_y:.2f}\"")
