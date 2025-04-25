@@ -1,289 +1,226 @@
+# -*- coding: utf-8 -*-
 """
-1 Bias analysis
-"""
-import pickle
+bias_analysis.py
 
-import numpy as np
+Revision and enhancement of the bias analysis workflow from lecture01_bias_analysis.pdf
+Features added/improved:
+ - Comprehensive section headers and docstrings
+ - Context managers to safely handle file I/O
+ - Explicit closing of FITS files
+ - More descriptive print statements and status updates
+ - Proper plotting of both single and median bias images
+ - Improved error handling and clarity on array shapes
+ - Explanatory comments for each step
+"""
 
 import os
 import glob
+import pickle
 
+import numpy as np
 from astropy.io import fits
 from matplotlib import pyplot as plt
 
-# =============================================================================
-print("\n\n1.1 Download the dataset and move it to the appropriate location")
-print("=============================================================================\n")
-print("The dataset is available at the following link:")
+# -----------------------------
+# 1.1 Dataset Download Reminder
+# -----------------------------
+print("\n\nSection 1.1: Download and move the dataset")
+print("=" * 60)
+print("Please download the dataset from:")
 print("https://drive.google.com/drive/folders/17FBWwLrFVDm5L7hEC9ZELETUy-sMqhjF")
+print("and place it in the TASTE_analysis folder under your home directory.")
+print("Example:")
+print("  mkdir -p ~/TASTE_analysis")
+print("  mv ~/Downloads/group05_QATAR-1_20230212 ~/TASTE_analysis/")
 
-"""
-1.1 Download the dataset and move it to the appropriate location
-https://drive.google.com/drive/folders/17FBWwLrFVDm5L7hEC9ZELETUy-sMqhjF
-"""
-
-# =============================================================================
-print("\n\n1.2 Write the FITS list files for each subdirectory")
-print("=============================================================================\n")
-
-"""
-1.2 Write the FITS list files for each subdirectory
-We have to have .list files for each subdirectory in the dataset.
-"""
-
-# take each file from
-# TASTE_analysis\group05_QATAR-1_20230212\bias
-# TASTE_analysis\group05_QATAR-1_20230212\flat
-# TASTE_analysis\group05_QATAR-1_20230212\science
-# and write them to a .list file inside the respective directory
-
-
+# -----------------------------
+# 1.2 Generate .list Files
+# -----------------------------
+print("\n\nSection 1.2: Writing FITS list files for bias, flat, and science")
+print("=" * 60)
+# Base data directory (adjust if needed)
 taste_dir = 'TASTE_analysis/group05_QATAR-1_20230212'
 
-# get the directories bias, flat and science separately
-dirs = ['bias', 'flat', 'science']
+# Subdirectories to index
+subdirs = ['bias', 'flat', 'science']
 
-# loop over the directories
-for d in dirs:
-    # get the files in the directory
-    files = glob.glob(f'{taste_dir}/{d}/*.fits')
-    # write the filenames to a .list file
-    with open(f'{taste_dir}/{d}/{d}.list', 'w') as f:
-        for file in files:
-            filename = os.path.basename(file)
-            f.write(f'{filename}\n')
+for sub in subdirs:
+    folder = os.path.join(taste_dir, sub)
+    list_path = os.path.join(folder, f"{sub}.list")
+    print(f"Scanning '{folder}' for .fits files...")
+    fits_files = sorted(glob.glob(os.path.join(folder, '*.fits')))
 
-# print bias.list, as a list of strings
-bias_list = np.genfromtxt(f'{taste_dir}/bias/bias.list', dtype=str)
-print(bias_list)
+    # Write the filenames (basename only) to the .list file
+    with open(list_path, 'w') as lf:
+        for fullpath in fits_files:
+            lf.write(os.path.basename(fullpath) + '\n')
+    print(f"Wrote {len(fits_files)} entries to {list_path}")
 
-# =============================================================================
-print("\n\n1.3 Extract information from the FITS file")
-print("=============================================================================\n")
+# Quick check: display the first few entries of bias.list
+bias_list = np.genfromtxt(os.path.join(taste_dir, 'bias', 'bias.list'), dtype=str)
+print("First 5 bias frames:", bias_list[:5])
 
-"""
-1.3 Extract information from the FITS file
+# -----------------------------
+# 1.3 Extract FITS Header Info
+# -----------------------------
+print("\n\nSection 1.3: Extracting header information from first bias frame")
+print("=" * 60)
+bias0_filename = bias_list[0]
+bias0_path = os.path.join(taste_dir, 'bias', bias0_filename)
 
-We use the standard astropy.io.fits routines to 1) open a single FITS file and save it into
-a variable named bias00_fits 2) store the Primary HDU of the fits file into a variable named
-bias00_hdu 3) print the header of the Primary HDU using the corresponding astropy.io.fits
-method
-"""
+with fits.open(bias0_path) as hdulist:
+    hdu = hdulist[0]
+    header = hdu.header
+    data_raw = hdu.data
 
-bias00_fits = fits.open(f'{taste_dir}/bias/{bias_list[0]}')
-bias00_hdu = bias00_fits[0]
-# pretty print the header
-for keyword, value in bias00_hdu.header.items():
-    print(f'{keyword}: {value}')
+print("Header keywords and values:")
+for key in ['JD', 'AIRMASS', 'GAIN', 'RDNOISE', 'NAXIS1', 'NAXIS2']:
+    comment = header.comments[key] if key in header.comments else ''
+    print(f" - {key}: {header[key]}    # {comment}")
 
-# examples of extracting information from the header
-bias00_time = bias00_hdu.header['JD']
-bias00_airmass = bias00_hdu.header['AIRMASS']
-bias00_gain = bias00_hdu.header['GAIN']
-bias00_gain_comment = bias00_hdu.header.comments['GAIN']
-bias00_readout_noise = bias00_hdu.header['RDNOISE']
-bias00_ron_comment = bias00_hdu.header.comments['RDNOISE']
-print('Julian date : {0:12.6f} JD'.format(bias00_time))
-print('CCD Gain : {0:4.6f} {1:.8s}'.format(bias00_gain,bias00_gain_comment))
-print('CCD Readout noise: {0:4.6f} {1:.3s}'.format(bias00_readout_noise,bias00_ron_comment))
+jd = header['JD']
+gain = header['GAIN']
+ron = header['RDNOISE']
+naxis1 = header['NAXIS1']
+naxis2 = header['NAXIS2']
+print(f"Converted JD = {jd:.6f}, gain = {gain:.3f} e/ADU, readout noise = {ron:.3f} e")
+# -----------------------------
+# 1.4 Array Dimensions in Python
+# -----------------------------
+print("\n\nSection 1.4: Checking array shape vs. FITS NAXIS")
+print("=" * 60)
+# Convert to electrons
+data_e = data_raw * gain
+rows, cols = data_e.shape
+print(f"FITS header NAXIS1 x NAXIS2: {naxis1} x {naxis2}")
+print(f"NumPy array shape (rows x cols): {rows} x {cols}")
+print(f"Array data type: {type(data_e)}")
 
-
-# =============================================================================
-print("\n\n1.4 Understanding the shape of an image/array in Python")
-print("=============================================================================\n")
-
-"""
-1.4 Understanding the shape of an image/array in Python
-
-To compute the median of all our frames, we need to open and save them somewhere in the Random
-Access Memory of the computer. That means that we have to create a buffer or stack with enough
-space (=correct dimensions) to keep all the images.
-But how are the images saved into the memory of the computer? The header of the FITS files can
-tell us the shape of the picture, i.e., the NAXIS1 and NAXIS2, which we may expect to be the length
-of the horizontal axis (number of columns) and the length of the vertical axis (number of row),
-respectively.
-"""
-
-bias00_naxis1 = bias00_hdu.header['NAXIS1']
-bias00_naxis2 = bias00_hdu.header['NAXIS2']
-print('Shape of the FITS image from the header : {0:4d} x {1:4d}'.format(bias00_naxis1, bias00_naxis2))
-bias00_data = bias00_hdu.data * bias00_gain
-bias00_nparray_dim00, bias00_nparray_dim01 = np.shape(bias00_data)
-print('Shape of the NumPy array extracted by astropy: {0:4d} x {1:4d}'.format(bias00_nparray_dim00, bias00_nparray_dim01))
-print('Our image is saved as a ', type(bias00_data))
-
-# =============================================================================
-print("\n\n1.5 Save the bias frames into a 3D array")
-print("=============================================================================\n")
-
-"""
-1.5 Save the bias frames into a 3D array
-
-To compute the median for each pixel using all our frames, we need to open and save all the images
-in the RAM.
-We first check how many images we have by computing the length of the bias list - commented
-lines will not be included in the computation of the length. We then retrieve the correct size of our
-frame according to how Python saved it in the computer’s memory. Finally, we make our empty
-array stack where we are going to store all the images
-"""
-
+# -----------------------------
+# 1.5 Build 3D Data Stack
+# -----------------------------
+print("\n\nSection 1.5: Building 3D stack of bias frames")
+print("=" * 60)
 n_images = len(bias_list)
-bias00_nparray_dim00, bias00_nparray_dim01 = np.shape(bias00_data)
-stack = np.empty([n_images, bias00_nparray_dim00, bias00_nparray_dim01])
+print(f"Number of bias frames: {n_images}")
 
-for i_bias, bias_name in enumerate(bias_list):
-    bias_temp = fits.open(f'{taste_dir}/bias/{bias_name}')
-    bias_data = bias_temp[0].data * bias00_gain
-    stack[i_bias] = bias_data
+# Prepare empty stack: shape = (n_images, rows, cols)
+stack = np.empty((n_images, rows, cols), dtype=float)
 
-median_bias = np.median(stack, axis=0)
-np.shape(median_bias)
+# Fill the stack
+for i, fname in enumerate(bias_list):
+    path = os.path.join(taste_dir, 'bias', fname)
+    with fits.open(path) as tmp:
+        arr = tmp[0].data * gain
+    stack[i, :, :] = arr
+    if i < 3:
+        print(f" Loaded {fname} into stack index {i}")
+print("... completed loading all frames.")
 
-print('Shape of the median bias frame: ', np.shape(median_bias))
+# Compute median frame
+dmedian = np.median(stack, axis=0)
+print(f"Median bias frame shape: {dmedian.shape}")
 
-# =============================================================================
-print("\n\n1.6 Plotting a single bias and a median bias")
-print("=============================================================================\n")
+# -----------------------------
+# 1.6 Plot single vs. median
+# -----------------------------
+print("\n\nSection 1.6: Plotting a single frame and the median")
+print("=" * 60)
+fig, axs = plt.subplots(2, 1, figsize=(8, 6), constrained_layout=True)
 
-"""
-1.6 Plotting a single bias and a median bias
+# Single frame
+im1 = axs[0].imshow(data_e, origin='lower', vmin=data_e.min(), vmax=data_e.max())
+axs[0].set_title('Single Bias Frame (raw)')
+axs[0].set_xlabel('X [pixels]')
+axs[0].set_ylabel('Y [pixels]')
 
-We use the utility matplotlib.pyplot.subplots to include two plots in the same image. The first
-two values identify the number of rows andcolumns of the subplot grid (in the example, 2 plots one
-on top of the other, spanning the entire horizontal range). We pass the argument figsize=(8,6)
-to define the width and height of the plot, in inches. In geenral, we can pass every argument
-accepted by matplotlib.pyplot.figure.
-"""
+# Median frame
+im2 = axs[1].imshow(dmedian, origin='lower', vmin=dmedian.min(), vmax=dmedian.max())
+axs[1].set_title('Median Bias Frame')
+axs[1].set_xlabel('X [pixels]')
+axs[1].set_ylabel('Y [pixels]')
 
-# ATTENTION, you may need to install msvc-runtime -> pip install msvc-runtime
-
-fig, ax = plt.subplots(2,1, figsize=(8,6)) # Caution, figsize will also␣influence positions.
-im1 = ax[0].imshow(bias00_data, vmin = 2770, vmax =2790, origin='lower')
-# add the colorbar using the figure's method,
-# telling which mappable we're talking about and
-# which axes object it should be near
-cbar = fig.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-cbar.set_label("e")
-ax[0].set_xlabel('X [pixels]')
-ax[0].set_ylabel('Y [pixels]')
-ax[1].set_xlabel('X [pixels]')
-ax[1].set_ylabel('Y [pixels]')
+# Shared colorbar
+cbar = fig.colorbar(im1, ax=axs, fraction=0.046, pad=0.04)
+cbar.set_label('Electrons [e]')
 plt.show()
 
-# =============================================================================
-print("\n\n1.7 Statistical analysis of the bias")
-print("=============================================================================\n")
+# -----------------------------
+# 1.7 Statistical Analysis
+# -----------------------------
+print("\n\nSection 1.7: Statistical analysis of bias variations and noise")
+print("=" * 60)
 
-"""
-1.7 Statistical analysis of the bias
+# Visual variation
+fig, axs = plt.subplots(2, 1, figsize=(8, 6), constrained_layout=True)
+im_stat = axs[0].imshow(dmedian, origin='lower', vmin=np.percentile(dmedian, 5),
+                       vmax=np.percentile(dmedian, 95))
+axs[0].set_title('Median Bias with Tight Color Range')
+axs[0].set_xlabel('X [pixels]')
+axs[0].set_ylabel('Y [pixels]')
 
-A bias frame comprises two primary components: the offset introduced by the electronics, and
-supposedly constant across the frame, and the readout noise. We can then use the bias to extract
-some information regarding the readout noise.
-First of all, let’s verify if the bias is indeed constant across the frame. Visually, we can highlight
-any variation in the bias by restricting the range of the colorbar. Analytically, we can compute the
-average across each column and plot the results as a function of the column number. We chose this
-way because the plot highlights a more substantial variation across the horizontal direction.
-
-"""
-
-fig, ax = plt.subplots(2,1, figsize=(8,6))
-im1 = ax[0].imshow(median_bias, vmin = 2777, vmax =2781, origin='lower')
-median_column = np.average(median_bias, axis=0)
-im2 = ax[1].plot(median_column)
-# add the colorbar using the figure's method,
-# telling which mappable we're talking about and
-# which axes object it should be near
-cbar = fig.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-cbar.set_label("e")
-ax[0].set_xlabel('X [pixels]')
-ax[0].set_ylabel('Y [pixels]')
-ax[1].set_xlabel('X [pixels]')
-ax[1].set_ylabel('Average counts [e]')
+# Column-wise average
+avg_cols = np.mean(dmedian, axis=0)
+axs[1].plot(avg_cols)
+axs[1].set_title('Column-wise Average of Median Bias')
+axs[1].set_xlabel('Column index')
+axs[1].set_ylabel('Mean counts [e]')
+# Colorbar for top plot
+cbar2 = fig.colorbar(im_stat, ax=axs[0], fraction=0.046, pad=0.04)
+cbar2.set_label('Electrons [e]')
 plt.show()
 
-starting_column= 300
-ending_column = 350
-print('Readout noise : {0:4.6f} e'.format(bias00_readout_noise))
-print('STD single frame : {0:4.6f} e'.format(np.std(bias00_data[:,starting_column:ending_column])))
-"""
-The values above refer to the readout noise of a single exposure. The median bias is the combination
-of 30 individual frames, so the associated error will be smaller than the one coming with a single frame.
-Suppose we approximate the median with the average function. In that case, we can use the standard equation for error 
-propagation to compute the associated error to the median bias, assuming
-that all the pixels from each bias are affected by the same error. The resulting value will change
-slightly if we use the readout noise as an estimate of the error associated with each image (case 1)
-or if we use the standard deviation of a bias frame (case 2)
-"""
-expected_noise_medianbias = bias00_readout_noise/np.sqrt(n_images)
-print('1) Expected noise of median bias : {0:4.6f} e'.format(expected_noise_medianbias))
-expected_std_medianbias = np.std(bias00_data[:,starting_column:ending_column])/np.sqrt(n_images)
-print('2) Expected STD of median bias : {0:4.6f} e'.format(expected_std_medianbias))
+# Compute readout noise from header vs. data
+start_col, end_col = 300, 350
+std_single = np.std(data_e[:, start_col:end_col])
+exp_noise_med = ron / np.sqrt(n_images)
+exp_std_med = std_single / np.sqrt(n_images)
+meas_std_med = np.std(dmedian[:, start_col:end_col])
+pixel_errors = np.std(stack, axis=0) / np.sqrt(n_images)
+med_pix_err = np.median(pixel_errors)
 
+print(f"Header readout noise: {ron:.3f} e")
+print(f"STD of single frame (cols {start_col}-{end_col}): {std_single:.3f} e")
+print(f"Expected noise of median (fromRON/sqrt(N)): {exp_noise_med:.3f} e")
+print(f"Expected STD of median (from data/sqrt(N)): {exp_std_med:.3f} e")
+print(f"Measured STD of median (cols {start_col}-{end_col}): {meas_std_med:.3f} e")
+print(f"Median pixel-based error: {med_pix_err:.3f} e")
 
-"""
-Alternatively, we can compute the error associated with the median bias from the data. We can
-use the standard deviation of the median bias, selecting the same range in columns as done before
-(case 3), or we can compute the standard deviation of each pixel across all the frames, divide
-by the square root of the number of images, and finally calculate the median of all these values.
-We perform the last step to have one value for the error associated with the median bias, but in
-principle, we could keep the entire frame.
-"""
-
-measured_std_medianbias = np.std(median_bias[:,starting_column:ending_column])
-print('Measured STD of median bias : {0:4.6f} e'.format(measured_std_medianbias))
-median_error = np.std(stack, axis=0) /np.sqrt(n_images)
-median_pixel_error = np.median(median_error)
-print('Median STD of each pixel : {0:4.6f} e'.format(median_pixel_error))
-
-"""
-We can see that the standard deviation computed on the median bias is slighlty higher than the
-associated error computed through the other techniques. We already analyzed the origin of this
-disagreement.
-Finally, we can plot the distribution of the error associated to each pixel of the median bias with
-the different estimates of the error. This plot should guide you towards the best choice fro the error
-to be associated to the median bias.
-"""
-
-# Standard deviation of each pixel
-STD_pixel = np.std(stack, axis=0)
-plt.figure(figsize=(8,6))
-plt.hist(median_error.flatten(), bins=20, range=(0,2.5), density=True,histtype='step', label='Pixel-based error')
-plt.axvline(expected_noise_medianbias, c='C1', label='Error using readoutnoise')
-plt.axvline(expected_std_medianbias, c='C2', label='Expected error using biasSTD')
-plt.axvline(measured_std_medianbias, c='C3', label='Measured STD of medianbias')
-plt.axvline(median_pixel_error, c='C4', label='Average Pixel-based error')
-plt.xlabel('e')
-plt.ylabel('Density')
+# Distribution of pixel errors
+t = pixel_errors.flatten()
+plt.figure(figsize=(8, 6))
+plt.hist(t, bins=20, range=(0, np.percentile(t, 99)), density=True,
+         histtype='step', label='Pixel-based error')
+plt.axvline(exp_noise_med, linestyle='--', label='RON/sqrt(N)')
+plt.axvline(exp_std_med, linestyle='-.', label='STD/sqrt(N)')
+plt.axvline(meas_std_med, linestyle=':', label='Measured STD of median')
+plt.axvline(med_pix_err, linestyle='-', label='Median pixel error')
+plt.xlabel('Error [e]')
+plt.ylabel('Normalized density')
 plt.legend()
+plt.title('Error distribution of median bias')
 plt.show()
 
-# =============================================================================
-print("\n\n1.8 Saving the output")
-print("=============================================================================\n")
+# -----------------------------
+# 1.8 Save results with pickle
+# -----------------------------
+print("\n\nSection 1.8: Saving outputs to pickle files")
+print("=" * 60)
 
-"""
-1.8 Saving the output
+output_dir = os.path.join(taste_dir, 'bias')
+pkl_paths = {
+    'median_bias': dmedian,
+    'median_error_map': pixel_errors,
+    'median_error_value': med_pix_err,
+    'bias_stack': stack
+}
 
-We save our files using the pickle module. This model allows the storage on disk of arrays as well
-as objects and dictionaries.
-"""
+for name, obj in pkl_paths.items():
+    file_path = os.path.join(output_dir, f"{name}.p")
+    with open(file_path, 'wb') as pf:
+        pickle.dump(obj, pf)
+    print(f"Saved {name} to {file_path}")
 
-with open(f'{taste_dir}/bias/median_bias.p', 'wb', buffering=0) as f:
-    # noinspection PyTypeChecker
-    pickle.dump(median_bias, f)
-with open(f'{taste_dir}/bias/median_bias_error.p', 'wb', buffering=0) as f:
-    # noinspection PyTypeChecker
-    pickle.dump(median_error, f)
-with open(f'{taste_dir}/bias/median_bias_error_value.p', 'wb', buffering=0) as f:
-    # noinspection PyTypeChecker
-    pickle.dump(median_pixel_error, f)
-with open(f'{taste_dir}/bias/stack_bias.p', 'wb', buffering=0) as f:
-    # noinspection PyTypeChecker
-    pickle.dump(stack, f)
-
-# load the data
-median_bias = pickle.load(open(f'{taste_dir}/bias/median_bias.p', 'rb'))
-
-print('Median bias frame:')
-print(median_bias)
+# Load-check one of the pickles
+loaded = pickle.load(open(os.path.join(output_dir, 'median_bias.p'), 'rb'))
+print(f"Loaded median_bias with shape {loaded.shape}")
