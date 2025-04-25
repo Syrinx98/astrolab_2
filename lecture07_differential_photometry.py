@@ -199,19 +199,6 @@ def main():
     err_all = diff_all * np.sqrt((target.aperture_errors/target.aperture)**2 +
                                   (sum_err/sum_ref)**2)
 
-    # --------------------------------------------------------------
-    # E) Save results to pickle files
-    # --------------------------------------------------------------
-    print("Saving differential photometry to pickle files...")
-    pickle.dump(bjd, open(f'{taste_dir}/taste_bjdtdb.p', 'wb'))
-    pickle.dump(diff1, open(f'{taste_dir}/differential_ref1.p', 'wb'))
-    pickle.dump(err1, open(f'{taste_dir}/differential_ref1_error.p', 'wb'))
-    pickle.dump(diff2, open(f'{taste_dir}/differential_ref2.p', 'wb'))
-    pickle.dump(err2, open(f'{taste_dir}/differential_ref2_error.p', 'wb'))
-    pickle.dump(diff_all, open(f'{taste_dir}/differential_allrefs.p', 'wb'))
-    pickle.dump(err_all, open(f'{taste_dir}/differential_allrefs_error.p', 'wb'))
-
-
     # D′.1: Ref #1
     plt.figure(figsize=(8,4), dpi=150)
     plt.scatter(bjd-offset, diff1, s=4, label='Ref #1')
@@ -324,8 +311,32 @@ def main():
     print(f'STD 5px Ref #2: {std5_2:.7f}')
     print(f'STD 5px Both: {std5_all:.7f}')
 
+    # New Section: Save results with exact file names
+    # Define variables for saving
+    bjd_tdb = bjd
+    # Normalize differential flux for target/ref1 and target/(ref1+ref2) using out-of-transit median
+    differential_ref01_normalized = diff1 / np.median(diff1[oot])
+    differential_ref01_normalized_error = err1 / np.median(diff1[oot])
+    differential_allref_normalized = diff_all / np.median(diff_all[oot])
+    differential_allref_normalized_error = err_all / np.median(diff_all[oot])
+    # Original differential photometry (non-normalized)
+    differential_ref01 = diff1
+    differential_ref01_error = err1
+    differential_allref = diff_all
+    differential_allref_error = err_all
 
+    # Save to pickle files using the exact file names provided
+    pickle.dump(bjd_tdb, open(f'{taste_dir}/taste_bjdtdb.p','wb'))
+    pickle.dump(differential_ref01_normalized, open(f'{taste_dir}/differential_ref01_normalized.p','wb'))
+    pickle.dump(differential_ref01_normalized_error, open(f'{taste_dir}/differential_ref01_normalized_error.p','wb'))
+    pickle.dump(differential_allref_normalized, open(f'{taste_dir}/differential_allref_normalized.p','wb'))
+    pickle.dump(differential_allref_normalized_error, open(f'{taste_dir}/differential_allref_normalized_error.p','wb'))
 
+    pickle.dump(differential_ref01, open(f'{taste_dir}/differential_ref01.p','wb'))
+    pickle.dump(differential_ref01_error, open(f'{taste_dir}/differential_ref01_error.p','wb'))
 
+    pickle.dump(differential_allref, open(f'{taste_dir}/differential_allref.p','wb'))
+    pickle.dump(differential_allref_error, open(f'{taste_dir}/differential_allref_error.p','wb'))
+    
 if __name__ == '__main__':
     main()
