@@ -1,217 +1,273 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+MCMC Transit Fitting Script for Qatar-1b (ottimizzato, versione completa)
+
+Modifiche principali:
+ 1) Pre-detrending del light curve TASTE con polinomio di grado 2 (fallback incluso)
+ 2) Caricamento dati TESS filtrati da Wotan (pdcsap_flat e pdcsap_err)
+ 3) Ricerca del punto di partenza con Differential Evolution
+ 4) Sampler emcee con StretchMove(a=1.3), 100 walker, 40000 passi
+ 5) Burn-in di 10000 passi e thinning di 50
+ 6) Diagnostic di acceptance fraction e autocorr time
+"""
 import numpy as np
-import pickle
 import matplotlib.pyplot as plt
-from astropy.io import fits
-
-# Attempt to import wotan; provide user-friendly error if missing
-try:
-    from wotan import flatten, transit_mask
-except ModuleNotFoundError:
-    raise ModuleNotFoundError(
-        "Required package 'wotan' not found. Install it via `pip install wotan` and retry.")
+import pickle
+import batman
+from scipy import stats
+import emcee
+from scipy.optimize import differential_evolution
+from functools import partial
+import warnings
+import corner
 
 # =============================================================================
-# 10 Filtering TESS Light Curves using Wotan
+# 1) Caricamento dati e pre-detrending TASTE --------------------------------
+def load_data():
+    taste_dir = 'TASTE_analysis/group05_QATAR-1_20230212'
+    tess_dir  = 'TESS_analysis'
+
+    # TASTE
+    taste_bjd = pickle.load(open(f'{taste_dir}/taste_bjdtdb.p', 'rb'))
+    flux      = pickle.load(open(f'{taste_dir}/differential_allref.p', 'rb'))
+    ferr      = pickle.load(open(f'{taste_dir}/differential_allref_error.p', 'rb'))
+    flux     /= np.median(flux)
+    ferr     /= np.median(flux)
+
+    # Pre-detrend: fit 2° polinomio su out-of-transit o fallback
+    t0_guess  = 2457475.2045
+    per_guess = 1.42002
+    phase = ((taste_bjd - t0_guess + 0.5*per_guess) % per_guess) - 0.5*per_guess
+    mask  = np.abs(phase) > 0.1
+    if np.sum(mask) < 5:
+        warnings.warn("Too few out-of-transit points; skipping pre-detrend.")
+        flux_detr = flux.copy()
+    else:
+        coeff     = np.polyfit(taste_bjd[mask], flux[mask], deg=2)
+        trend     = np.polyval(coeff, taste_bjd)
+        flux_detr = flux / trend
+
+    # TESS (dati filtrati con Wotan)
+    tess_dict = pickle.load(open(f'{tess_dir}/qatar1_TESS_sector024_filtered.p', 'rb'))
+    tess_bjd  = tess_dict['time']
+    tess_flux = tess_dict['pdcsap_flat']
+    tess_err  = tess_dict['pdcsap_err']
+    tess_flux /= np.median(tess_flux)
+    tess_err  /= np.median(tess_flux)
+
+    return taste_bjd, flux_detr, ferr, tess_bjd, tess_flux, tess_err
+
 # =============================================================================
-# This script performs detrending of TESS SAP and PDCSAP light curves
-# and generates all diagnostic plots as in the lesson notebook.
+# 2) Inizializzazione parametri e confini -----------------------------------
+def init_theta():
+    return np.array([
+        2457475.2045,  # t0
+        1.42002,       # per
+        0.1463,        # rp/Rs
+        6.25,          # a/Rs
+        84.08,         # inc
+        0.515, 0.098,  # TESS u1,u2
+        0.652, 0.078,  # TASTE u1,u2
+        1.0, 0.0, 0.0, # poly0, poly1, poly2
+        0.001, 0.001   # jit_TESS, jit_TASTE
+    ])
 
-# 1. Configuration -----------------------------------------------------------
-print("# 1. Loading selected TESS light curve data")
+def init_boundaries(theta0):
+    npar = len(theta0)
+    bounds = np.zeros((2, npar))
+    # t0, per
+    bounds[:,0] = [theta0[0]-0.5, theta0[0]+0.5]
+    bounds[:,1] = [theta0[1]-0.5, theta0[1]+0.5]
+    # rp/Rs, a/Rs, inc
+    bounds[:,2] = [0.0, 0.5]
+    bounds[:,3] = [0.0, 20.0]
+    bounds[:,4] = [0.0, 90.0]
+    # limb darkening
+    bounds[0,5:9] = 0.0
+    bounds[1,5:9] = 1.0
+    # trend coeffs
+    bounds[:,9]  = [0.9,  1.1]
+    bounds[:,10] = [-0.5, 0.5]
+    bounds[:,11] = [-0.5, 0.5]
+    # jitters
+    bounds[:,12] = [0.0, 0.05]
+    bounds[:,13] = [0.0, 0.05]
+    return bounds
 
-# Paths (keep original structure)
-tess_dir = 'TESS_analysis'
-sector_file = f"{tess_dir}/qatar1_TESS_sector024_selected.p"
-print(f"Loading data from: {sector_file}")
-with open(sector_file, 'rb') as f:
-    data = pickle.load(f)
+# =============================================================================
+# 3) Funzioni di probabilità ------------------------------------------------
+def log_prior(theta):
+    u_means = [0.515, 0.098, 0.652, 0.078]
+    u_stds  = [0.10,  0.10,  0.05,  0.10]
+    lp = 0.0
+    for i in range(4):
+        lp += stats.norm.logpdf(theta[5+i], loc=u_means[i], scale=u_stds[i])
+    return lp
 
-time = data['time']
-sap_flux = data['sap_flux']
-sap_flux_error = data['sap_flux_error']
-pdcsap_flux = data['pdcsap_flux']
-pdcsap_flux_error = data['pdcsap_flux_error']
-print(f"Loaded {len(time)} points")
 
-# Transit parameters (Qatar-1b ephemeris)
-# Mid-transit time and orbital period must be updated for Qatar-1
-Transit_time = 2458977.55982   # BJD_TDB approximate mid-transit from TESS Sector 24 data
-Period = 1.42002504            # Orbital period [days] for Qatar-1b
-# Transit duration (from ExoFOP): adjust if necessary
-Transit_duration_hrs = 2.982    # hours
-Transit_window = Transit_duration_hrs * 2 / 24  # days (double duration)
+def log_likelihood(theta, taste_bjd, flux, ferr, tess_bjd, tess_flux, tess_err):
+    t0, per, rp, a, inc = theta[:5]
+    tess_u1, tess_u2   = theta[5], theta[6]
+    taste_u1, taste_u2 = theta[7], theta[8]
+    poly0, poly1, poly2= theta[9:12]
+    jit_tess, jit_taste= theta[12], theta[13]
 
-# Mask in-transit points
-mask = transit_mask(time=time, period=Period, duration=Transit_window, T0=Transit_time)
-print(f"Masked {np.sum(mask)} in-transit points")
-# 2. HSpline flattening ------------------------------------------------------
-sap_flat, sap_trend = flatten(time, sap_flux, method='hspline', window_length=0.5,
-                              break_tolerance=0.5, return_trend=True)
-pdcsap_flat, pdcsap_trend = flatten(time, pdcsap_flux, method='hspline',
-                                    window_length=0.5, break_tolerance=0.5,
-                                    return_trend=True)
-sap_flat_m, sap_trend_m = flatten(time, sap_flux, method='hspline', window_length=0.5,
-                                  break_tolerance=0.5, return_trend=True, mask=mask)
-pdcsap_flat_m, pdcsap_trend_m = flatten(time, pdcsap_flux, method='hspline',
-                                        window_length=0.5, break_tolerance=0.5,
-                                        return_trend=True, mask=mask)
-print("HSpline flattening done (w=0.5) with and without mask")
+    # batman setup
+    params = batman.TransitParams()
+    params.t0, params.per = t0, per
+    params.rp, params.a   = rp, a
+    params.inc            = inc
+    params.ecc, params.w  = 0.0, 90.0
+    params.limb_dark      = 'quadratic'
 
-# 3. Plot raw & trend --------------------------------------------------------
-plt.figure(figsize=(8,4))
-plt.title('TESS SAP: raw & HSpline trend (no mask)')
-plt.scatter(time, sap_flux, c='C0', s=3)
-plt.errorbar(time, sap_flux, yerr=sap_flux_error, fmt='none', ecolor='gray', alpha=0.3)
-plt.plot(time, sap_trend, c='C1', label='trend')
-plt.xlabel('BJD_TDB'); plt.ylabel('SAP flux [e-/s]')
-plt.legend(); plt.tight_layout(); plt.show()
+    # TESS model
+    params.u = [tess_u1, tess_u2]
+    m_tess  = batman.TransitModel(params, tess_bjd)
+    model_tess = m_tess.light_curve(params)
 
-plt.figure(figsize=(8,4))
-plt.title('TESS SAP: normalized (no mask)')
-plt.scatter(time, sap_flat, c='C0', s=3)
-plt.errorbar(time, sap_flat, yerr=sap_flux_error/sap_trend, fmt='none', ecolor='gray', alpha=0.3)
-plt.axhline(1, c='C1'); plt.xlabel('BJD_TDB'); plt.ylabel('Normalized flux')
-plt.tight_layout(); plt.show()
+    # TASTE model
+    params.u = [taste_u1, taste_u2]
+    m_taste = batman.TransitModel(params, taste_bjd)
+    base_taste = m_taste.light_curve(params)
+    trend = poly0 + poly1*(taste_bjd-np.mean(taste_bjd)) + poly2*(taste_bjd-np.mean(taste_bjd))**2
+    model_taste = base_taste * trend
 
-plt.figure(figsize=(8,4))
-plt.title('TESS PDCSAP: raw & HSpline trend (no mask)')
-plt.scatter(time, pdcsap_flux, c='C2', s=3)
-plt.errorbar(time, pdcsap_flux, yerr=pdcsap_flux_error, fmt='none', ecolor='gray', alpha=0.3)
-plt.plot(time, pdcsap_trend, c='C3', label='trend')
-plt.xlabel('BJD_TDB'); plt.ylabel('PDCSAP flux [e-/s]')
-plt.legend(); plt.tight_layout(); plt.show()
+    # errori con jitter
+    err2_tess  = tess_err**2  + jit_tess**2
+    err2_taste = ferr**2      + jit_taste**2
 
-plt.figure(figsize=(8,4))
-plt.title('TESS PDCSAP: normalized (no mask)')
-plt.scatter(time, pdcsap_flat, c='C2', s=3)
-plt.errorbar(time, pdcsap_flat, yerr=pdcsap_flux_error/pdcsap_trend, fmt='none', ecolor='gray', alpha=0.3)
-plt.axhline(1, c='C3'); plt.xlabel('BJD_TDB'); plt.ylabel('Normalized flux')
-plt.tight_layout(); plt.show()
+    chi2_tess  = np.sum((tess_flux-model_tess)**2/err2_tess)
+    chi2_taste = np.sum((flux-model_taste)**2/err2_taste)
+    lnD = np.sum(np.log(err2_tess)) + np.sum(np.log(err2_taste))
+    N   = len(tess_flux)+len(flux)
+    return -0.5*(N*np.log(2*np.pi) + chi2_tess + chi2_taste + lnD)
 
-# 4. Phase-folded normalized ------------------------------------------------
-phase = (time - Transit_time - Period/2) % Period - Period/2
-# Optional shift for phase plots (in days)
-phase_shift = 0.0  # adjust >0 to move points right, <0 to move left
-phase_plot = phase + phase_shift
 
-plt.figure(figsize=(8,4))
-plt.title('SAP: phase-folded normalized (no mask)')
-plt.scatter(phase_plot, sap_flat, c='C0', s=3)
-plt.errorbar(phase_plot, sap_flat, yerr=sap_flux_error/sap_trend,
-             fmt='none', ecolor='gray', alpha=0.3)
-plt.axhline(1, c='C1'); plt.xlim(-0.4 + phase_shift, 0.4 + phase_shift)
-plt.xlabel('Phase [d]'); plt.ylabel('Normalized flux')
-plt.tight_layout(); plt.show()
+def log_probability(theta, taste_bjd, flux, ferr, tess_bjd, tess_flux, tess_err, boundaries):
+    lower, upper = boundaries
+    if np.any(theta<lower) or np.any(theta>upper):
+        return -np.inf
+    lp = log_prior(theta)
+    if not np.isfinite(lp):
+        return -np.inf
+    ll = log_likelihood(theta, taste_bjd, flux, ferr, tess_bjd, tess_flux, tess_err)
+    if not np.isfinite(ll):
+        return -np.inf
+    return lp + ll
 
-plt.figure(figsize=(8,4))
-plt.title('PDCSAP: phase-folded normalized (no mask)')
-plt.scatter(phase_plot, pdcsap_flat, c='C2', s=3)
-plt.errorbar(phase_plot, pdcsap_flat, yerr=pdcsap_flux_error/pdcsap_trend,
-             fmt='none', ecolor='gray', alpha=0.3)
-plt.axhline(1, c='C3'); plt.xlim(-0.4 + phase_shift, 0.4 + phase_shift)
-plt.xlabel('Phase [d]'); plt.ylabel('Normalized flux')
-plt.tight_layout(); plt.show()
+# =============================================================================
+# 4) Differential Evolution per punto di partenza --------------------------
+def find_starting_point(boundaries, taste_bjd, flux, ferr, tess_bjd, tess_flux, tess_err):
+    bnds = [(lo,hi) for lo,hi in zip(boundaries[0], boundaries[1])]
+    func = lambda x: -log_probability(x, taste_bjd, flux, ferr, tess_bjd, tess_flux, tess_err, boundaries)
+    res = differential_evolution(func, bnds, maxiter=2000)
+    print(f"DE start: log-prob = {-res.fun:.1f}")
+    return res.x
 
-# 5. Phase-folded normalized with masked points -------------------------------- Phase-folded normalized with masked points --------------------------------
-plt.figure(figsize=(8,4))
-plt.title('SAP: phase-folded normalized with masked points')
-# plot normalized SAP flattened light curve\ nplt.scatter(phase, sap_flat, s=2, c='C0', alpha=0.5, label='normalized')
-# overlay masked in-transit points on normalized curve
-plt.scatter(phase[mask], sap_flat[mask], s=30, facecolors='none', edgecolors='r', label='masked')
-plt.axhline(1, c='k', ls='--')
-plt.xlim(-0.4,0.4)
-plt.xlabel('Phase [d]'); plt.ylabel('Normalized flux')
-plt.legend(); plt.tight_layout(); plt.show()
+# =============================================================================
+# 5) Esecuzione MCMC --------------------------------------------------------
+def run_mcmc(theta0, taste_bjd, flux, ferr, tess_bjd, tess_flux, tess_err, boundaries):
+    ndim     = len(theta0)
+    nwalkers = 100
+    nsteps   = 40000
+    p0 = theta0 + 1e-4 * np.random.randn(nwalkers, ndim)
+    prob = partial(log_probability,
+                   taste_bjd=taste_bjd, flux=flux, ferr=ferr,
+                   tess_bjd=tess_bjd, tess_flux=tess_flux,
+                   tess_err=tess_err, boundaries=boundaries)
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, prob,
+                                    moves=emcee.moves.StretchMove(a=1.3))
+    print("Running MCMC...")
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        sampler.run_mcmc(p0, nsteps, progress=True)
 
-plt.figure(figsize=(8,4))
-plt.title('PDCSAP: phase-folded normalized with masked points')
-# plot normalized PDCSAP flattened light curve
-plt.scatter(phase, pdcsap_flat, s=2, c='C2', alpha=0.5, label='normalized')
-# overlay masked in-transit points
-plt.scatter(phase[mask], pdcsap_flat[mask], s=30, facecolors='none', edgecolors='r', label='masked')
-plt.axhline(1, c='k', ls='--')
-plt.xlim(-0.4,0.4)
-plt.xlabel('Phase [d]'); plt.ylabel('Normalized flux')
-plt.legend(); plt.tight_layout(); plt.show()
+    af = np.mean(sampler.acceptance_fraction)
+    print(f"Mean acceptance fraction: {af:.3f}")
+    try:
+        tau = sampler.get_autocorr_time()
+        print("Autocorr times:", np.round(tau,1))
+    except Exception as e:
+        print("Autocorr time estimate failed:", e)
+    return sampler
 
-# 6. Compare trends no mask vs mask ----------------------------------------- Compare trends no mask vs mask -----------------------------------------
-plt.figure(figsize=(8,4))
-plt.title('SAP trend: no mask vs mask')
-plt.scatter(time, sap_flux, s=2, c='C0', alpha=0.5)
-plt.plot(time, sap_trend, c='C1', label='no mask')
-plt.plot(time, sap_trend_m, c='C2', label='mask')
-plt.xlabel('BJD_TDB'); plt.ylabel('Flux [e-/s]')
-plt.legend(); plt.tight_layout(); plt.show()
+# =============================================================================
+# 6) Analisi catene: trace plot e corner -----------------------------------
+def analyze_samples(sampler):
+    labels = ['t0','per','rp','a','inc',
+              'TESS_u1','TESS_u2','TASTE_u1','TASTE_u2',
+              'poly0','poly1','poly2','jit_TESS','jit_TASTE']
+    burn = 10000
+    flat = sampler.get_chain(discard=burn, thin=50, flat=True)
 
-plt.figure(figsize=(8,4))
-plt.title('PDCSAP trend: no mask vs mask')
-plt.scatter(time, pdcsap_flux, s=2, c='C2', alpha=0.5)
-plt.plot(time, pdcsap_trend, c='C3', label='no mask')
-plt.plot(time, pdcsap_trend_m, c='C4', label='mask')
-plt.xlabel('BJD_TDB'); plt.ylabel('Flux [e-/s]')
-plt.legend(); plt.tight_layout(); plt.show()
+    fig, axes = plt.subplots(len(labels),1, figsize=(8,2*len(labels)), sharex=True)
+    for i, lab in enumerate(labels):
+        axes[i].plot(sampler.get_chain()[:,:,i], alpha=0.3)
+        axes[i].set_ylabel(lab)
+    axes[-1].set_xlabel('Step')
+    plt.tight_layout(); plt.show()
 
-# 7. Phase-folded normalized masked ------------------------------------------
-plt.figure(figsize=(8,4))
-plt.title('SAP: phase-folded normalized (mask)')
-plt.scatter(phase, sap_flat_m, c='C0', s=3)
-plt.errorbar(phase, sap_flat_m, yerr=sap_flux_error/sap_trend_m, fmt='none', ecolor='gray', alpha=0.3)
-plt.axhline(1, c='C1'); plt.xlim(-0.4,0.4)
-plt.xlabel('Phase [d]'); plt.ylabel('Normalized flux')
-plt.tight_layout(); plt.show()
+    fig = corner.corner(flat, labels=labels, show_titles=True, title_fmt='.3f')
+    plt.show()
+    return flat
 
-plt.figure(figsize=(8,4))
-plt.title('PDCSAP: phase-folded normalized (mask)')
-plt.scatter(phase, pdcsap_flat_m, c='C2', s=3)
-plt.errorbar(phase, pdcsap_flat_m, yerr=pdcsap_flux_error/pdcsap_trend_m, fmt='none', ecolor='gray', alpha=0.3)
-plt.axhline(1, c='C3'); plt.xlim(-0.4,0.4)
-plt.xlabel('Phase [d]'); plt.ylabel('Normalized flux')
-plt.tight_layout(); plt.show()
+# =============================================================================
+# 7) Best-fit comparison plots ----------------------------------------------
+def plot_best_fit(theta, taste_bjd, flux, ferr, tess_bjd, tess_flux, tess_err):
+    params = batman.TransitParams()
+    params.t0, params.per = theta[0], theta[1]
+    params.rp, params.a, params.inc = theta[2], theta[3], theta[4]
+    params.ecc, params.w = 0.0, 90.0
+    params.limb_dark = 'quadratic'
 
-# 8. Test various algorithms and window lengths -----------------------------
-methods = [('hspline',0.5), ('biweight',1.0), ('biweight',1.5), ('hspline',1.0), ('hspline',1.5)]
-stats = {}
-for method,w in methods:
-    f_s, t_s = flatten(time, sap_flux, method=method, window_length=w,
-                       break_tolerance=0.5, return_trend=True, mask=mask)
-    f_p, t_p = flatten(time, pdcsap_flux, method=method, window_length=w,
-                       break_tolerance=0.5, return_trend=True, mask=mask)
-    stats[(method,w)] = (np.std(f_s[~mask]), np.std(f_p[~mask]))
-    print(f"STD SAP {method} w={w}: {stats[(method,w)][0]:.6f}")
-    print(f"STD PDCSAP {method} w={w}: {stats[(method,w)][1]:.6f}")
+    params.u = theta[5:7]
+    m_tess = batman.TransitModel(params, tess_bjd)
+    model_tess = m_tess.light_curve(params)
 
-# 9. Multi-trend comparison -------------------------------------------------
-plt.figure(figsize=(8,4))
-plt.title('SAP: multiple trend models (no mask, mask, biweight)')
-plt.scatter(time, sap_flux, s=2, c='C0', alpha=0.5)
-plt.plot(time, sap_trend, c='C1', label='hspline w=0.5 no mask')
-plt.plot(time, sap_trend_m, c='C2', label='hspline w=0.5 mask')
-# pick biweight w=1.0
-_, sap_trend_bw10 = flatten(time, sap_flux, method='biweight', window_length=1.0,
-                            break_tolerance=0.5, return_trend=True, mask=mask)
-plt.plot(time, sap_trend_bw10, c='C3', label='biweight w=1.0 mask')
-plt.xlabel('BJD_TDB'); plt.ylabel('Flux [e-/s]')
-plt.legend(); plt.tight_layout(); plt.show()
+    plt.figure(figsize=(8,4))
+    plt.errorbar(tess_bjd, tess_flux, yerr=tess_err, fmt='.', ms=2, alpha=0.5, label='TESS data')
+    plt.plot(tess_bjd, model_tess, 'r-', lw=1.5, label='Best-fit model')
+    plt.xlabel('BJD_TDB'); plt.ylabel('Relative flux'); plt.legend(); plt.tight_layout(); plt.show()
 
-plt.figure(figsize=(8,4))
-plt.title('PDCSAP: multiple trend models (no mask, mask, biweight)')
-plt.scatter(time, pdcsap_flux, s=2, c='C2', alpha=0.5)
-plt.plot(time, pdcsap_trend, c='C3', label='hspline w=0.5 no mask')
-plt.plot(time, pdcsap_trend_m, c='C4', label='hspline w=0.5 mask')
-_, pdcsap_trend_bw10 = flatten(time, pdcsap_flux, method='biweight', window_length=1.0,
-                              break_tolerance=0.5, return_trend=True, mask=mask)
-plt.plot(time, pdcsap_trend_bw10, c='C5', label='biweight w=1.0 mask')
-plt.xlabel('BJD_TDB'); plt.ylabel('Flux [e-/s]')
-plt.legend(); plt.tight_layout(); plt.show()
+    phase = ((tess_bjd - params.t0 + 0.5*params.per) % params.per) - 0.5*params.per
+    idx = np.argsort(phase)
+    plt.figure(figsize=(8,4))
+    plt.scatter(phase, tess_flux, s=2, alpha=0.5); plt.plot(phase[idx], model_tess[idx], 'r-', lw=1.5)
+    plt.xlim(-0.2,0.2); plt.xlabel('Phase'); plt.ylabel('Relative flux'); plt.tight_layout(); plt.show()
 
-# 10. Save filtered data ----------------------------------------------------
-output = {
-    'time': time,
-    'sap_flat': sap_flat_m, 'sap_err': sap_flux_error/sap_trend_m,
-    'pdcsap_flat': pdcsap_flat_m, 'pdcsap_err': pdcsap_flux_error/pdcsap_trend_m
-}
-outfile = f"{tess_dir}/qatar1_TESS_sector024_filtered.p"
-with open(outfile, 'wb') as f:
-    pickle.dump(output, f)
-print(f"Saved filtered data to: {outfile}")
-print("Done.")
+    params.u = theta[7:9]
+    m_taste = batman.TransitModel(params, taste_bjd)
+    base_taste = m_taste.light_curve(params)
+    trend = theta[9] + theta[10]*(taste_bjd-np.mean(taste_bjd)) + theta[11]*(taste_bjd-np.mean(taste_bjd))**2
+    model_taste = base_taste * trend
+
+    plt.figure(figsize=(8,4))
+    plt.scatter(taste_bjd, flux, s=2, alpha=0.5, label='TASTE data')
+    plt.plot(taste_bjd, model_taste, 'r-', lw=1.5, label='Best-fit model')
+    plt.xlabel('BJD_TDB'); plt.ylabel('Relative flux'); plt.legend(); plt.tight_layout(); plt.show()
+
+# =============================================================================
+# 8) Derived physical parameters -------------------------------------------
+def derive_physical_params(flat):
+    RpRs = flat[:,2]
+    n    = len(RpRs)
+    r_star = np.random.normal(0.48, 0.04, size=n)
+    conv = 695700/71492
+    Rp = RpRs * r_star * conv
+    print(f"Planet radius: {np.mean(Rp):.3f} ± {np.std(Rp):.3f} R_jup")
+
+# =============================================================================
+# Main ----------------------------------------------------------------------
+if __name__ == '__main__':
+    taste_bjd, flux_detr, ferr, tess_bjd, tess_flux, tess_err = load_data()
+    theta0     = init_theta()
+    boundaries = init_boundaries(theta0)
+    theta0     = find_starting_point(boundaries, taste_bjd, flux_detr, ferr, tess_bjd, tess_flux, tess_err)
+    sampler    = run_mcmc(theta0, taste_bjd, flux_detr, ferr, tess_bjd, tess_flux, tess_err, boundaries)
+    flat       = analyze_samples(sampler)
+    theta_med  = np.median(flat, axis=0)
+    plot_best_fit(theta_med, taste_bjd, flux_detr, ferr, tess_bjd, tess_flux, tess_err)
+    derive_physical_params(flat)
+
+    print("Fitting completo.")
