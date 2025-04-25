@@ -1,228 +1,199 @@
+#!/usr/bin/env python3
 """
-9 Extracting TESS Light Curves and Applying Quality Flags
+improved_tess_lightcurve_analysis.py
 
-In this code, we demonstrate how to:
+This script demonstrates the extraction and cleaning of TESS light curves (LCf) for a single sector,
+following the lesson on TESS SAP and PDCSAP photometry and quality flag handling.
 
-1. Open a TESS Light Curve file (LCf) corresponding to a single sector.
-2. Explore the content of the LCf and identify the main columns of interest:
-   - TIME (BJD_TDB)
-   - SAP_FLUX and SAP_FLUX_ERR (Simple Aperture Photometry)
-   - PDCSAP_FLUX and PDCSAP_FLUX_ERR (SAP flux corrected for systematics)
-   - QUALITY bitmask
-3. Convert the time array from BTJD to BJD by adding back the BJDREFI and BJDREFF constants.
-4. Plot the SAP and PDCSAP fluxes to understand their differences.
-5. Identify and exclude bad data points:
-   - Use np.isfinite to remove NaN or Inf values.
-   - Use the QUALITY bitmask to exclude observations with known issues.
-6. Apply a conservative approach first (exclude all data with any nonzero quality flag).
-7. Optionally, use a selective approach by defining a custom bitmask of problematic flags.
-8. Further manually exclude data if necessary.
-9. Save the final selected data into a pickle file for later analysis.
+Steps:
+1. Load and inspect the FITS file structure.
+2. Extract photometry arrays and convert times.
+3. Plot raw flux vs BJD_TDB for SAP and PDCSAP separately.
+4. Initial SAP vs PDCSAP comparison plot.
+5. Print array shapes and sample PDCSAP values.
+6. Conservative quality filtering (NaN/Inf and QUALITY>0) and combined selection overview.
+7. Optional selective filtering via custom bitmask.
+8. Segment markers for visual checks.
+9. Manual exclusion of specified time ranges with detailed plot.
+10. Save cleaned data for later use.
 
-We assume:
-- The LC file is already in the working directory.
-- You have the sector's LC and TPF files named similarly as in the Moodle text.
-- Here we show the analysis for sector 24 only. You must repeat the process for each sector.
 """
 
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
 import pickle
 
 # =============================================================================
-print("\n\n 6.1. Reading TESS Light Curve File for a single sector")
-print("=============================================================================\n")
+# 1. Configuration and File Paths
+# =============================================================================
+tess_dir = 'TESS_analysis'
+sector = 24
+lcf_filename = f'qatar_1_sector{sector}_lc.fits'
+sector24_lcf = os.path.join(tess_dir, lcf_filename)
 
-"""
-Replace the file name with your actual LC file name if needed.
-In this example, we use sector 24:
-LC file: qatar1_sector24_lc.fits
-"""
+print(f"\n{'='*80}")
+print(f"1. Loading FITS: {sector24_lcf}")
+print(f"{'='*80}\n")
 
-tess_dir = "TESS_analysis"
+if not os.path.isfile(sector24_lcf):
+    raise FileNotFoundError(f"File not found: {sector24_lcf}")
 
-sector24_lcf = f"{tess_dir}/qatar_1_sector24_lc.fits"
-print("Light Curve file being used:", sector24_lcf)
-
-# Let's inspect the structure of the LC file
+# =============================================================================
+# 2. Inspect and extract data
+# =============================================================================
+print("Inspecting FITS structure:")
 fits.info(sector24_lcf)
 
-# Open the LC file
-lchdu = fits.open(sector24_lcf)
-print("\nColumns in the LIGHTCURVE extension:")
-print(lchdu[1].columns)
+with fits.open(sector24_lcf, mode='readonly') as hdulist:
+    lc_hdu = hdulist[1]
+    data   = lc_hdu.data.copy()
+    header = lc_hdu.header.copy()
+
+# Photometry and quality arrays
+time_btjd   = data['TIME']
+sap_flux    = data['SAP_FLUX']
+sap_err     = data['SAP_FLUX_ERR']
+pdcsap_flux = data['PDCSAP_FLUX']
+pdcsap_err  = data['PDCSAP_FLUX_ERR']
+quality     = data['QUALITY']
+
+# Convert BTJD to BJD_TDB
+bjdrefi = header.get('BJDREFI', 2457000)
+bjdreff = header.get('BJDREFF', 0.0)
+time_bjd = time_btjd + bjdrefi + bjdreff
+
+print(f"Data counts: TIME={time_bjd.size}, SAP={sap_flux.size}, PDCSAP={pdcsap_flux.size}, Q={quality.size}")
 
 # =============================================================================
-print("\n\n 6.2. Extract arrays of interest")
-print("=============================================================================\n")
+# 3. Plot raw SAP and PDCSAP separately vs BJD_TDB
+# =============================================================================
+plt.figure(figsize=(8,4), dpi=120)
+plt.plot(time_bjd, sap_flux,    '.', markersize=4, label='SAP Raw')
+plt.xlabel('BJD_TDB [days]')
+plt.ylabel('SAP Flux [e-/s]')
+plt.title(f'Sector {sector}: SAP Flux vs BJD_TDB')
+plt.grid(alpha=0.3)
+plt.tight_layout(); plt.show()
 
-"""
-From the TESS documentation and the LC file columns, we identify the main arrays:
-- TIME: BJD - 2457000
-- SAP_FLUX, SAP_FLUX_ERR
-- PDCSAP_FLUX, PDCSAP_FLUX_ERR
-- QUALITY bitmask
-
-We also need to add back BJDREFI and BJDREFF to TIME to get the actual BJD_TDB.
-"""
-
-sap_flux = lchdu[1].data['SAP_FLUX']
-sap_flux_error = lchdu[1].data['SAP_FLUX_ERR']
-pdcsap_flux = lchdu[1].data['PDCSAP_FLUX']
-pdcsap_flux_error = lchdu[1].data['PDCSAP_FLUX_ERR']
-quality_bitmask = lchdu[1].data['QUALITY']
-
-time_array = lchdu[1].data['TIME'] + lchdu[1].header['BJDREFI'] +  lchdu[1].header['BJDREFF']
-
-print("Number of data points:")
-print("TIME:", time_array.shape)
-print("SAP_FLUX:", sap_flux.shape)
-print("PDCSAP_FLUX:", pdcsap_flux.shape)
+plt.figure(figsize=(8,4), dpi=120)
+plt.plot(time_bjd, pdcsap_flux, '.', markersize=4, label='PDCSAP Raw')
+plt.xlabel('BJD_TDB [days]')
+plt.ylabel('PDCSAP Flux [e-/s]')
+plt.title(f'Sector {sector}: PDCSAP Flux vs BJD_TDB')
+plt.grid(alpha=0.3)
+plt.tight_layout(); plt.show()
 
 # =============================================================================
-print("\n\n 6.3. Plot SAP and PDCSAP fluxes")
-print("=============================================================================\n")
-
-"""
-We make a basic plot of SAP and PDCSAP flux vs time.
-"""
-
-plt.figure(figsize=(6,4))
-plt.scatter(time_array, sap_flux, s=5, label='SAP')
-plt.scatter(time_array, pdcsap_flux, s=5, label='PDCSAP')
-plt.xlabel('BJD_TDB [d]')
-plt.ylabel('e-/s')
-plt.legend()
-plt.title("SAP and PDCSAP flux comparison")
-plt.show()
-
-# Notice some PDCSAP points are NaN and don't appear on the plot.
-print("\nSome elements of PDCSAP flux:", pdcsap_flux[10:20])
+# 4. Initial SAP vs PDCSAP plot
+# =============================================================================
+plt.figure(figsize=(8,4), dpi=120)
+plt.scatter(time_bjd, sap_flux,    s=6, label='SAP')
+plt.scatter(time_bjd, pdcsap_flux, s=6, label='PDCSAP')
+plt.xlabel('BJD_TDB [days]')
+plt.ylabel('Flux [e-/s]')
+plt.title(f'Sector {sector}: SAP vs PDCSAP')
+plt.legend(); plt.grid(alpha=0.4)
+plt.tight_layout(); plt.show()
+print('Non-finite PDCSAP indices:', np.where(~np.isfinite(pdcsap_flux))[0][:10])
 
 # =============================================================================
-print("\n\n 6.4. Excluding bad values (NaN/Inf) and bad QUALITY flags")
-print("=============================================================================\n")
-
-"""
-We first exclude non-finite values.
-We use np.isfinite to find good data points in PDCSAP (and thus also for SAP).
-"""
-
-finite_selection = np.isfinite(pdcsap_flux)
-
-"""
-We now exclude data points with quality flags > 0 (conservative approach).
-"""
-
-conservative_selection = ~(quality_bitmask > 0) & finite_selection
-
-"""
-At this point, conservative_selection is True where data is good and finite.
-We can plot again highlighting excluded points.
-"""
-
-plt.figure(figsize=(6,4))
-plt.scatter(time_array[conservative_selection], sap_flux[conservative_selection],
-            s=5, label='SAP - selected data')
-plt.scatter(time_array, pdcsap_flux, s=5, label='PDCSAP')
-plt.scatter(time_array[~conservative_selection], sap_flux[~conservative_selection],
-            s=5, c='r', label='SAP - excluded data')
-plt.errorbar(time_array[conservative_selection], sap_flux[conservative_selection],
-             yerr=sap_flux_error[conservative_selection], fmt=' ', alpha=0.5,
-             ecolor='k', zorder=-1)
-
-plt.xlabel('BJD_TDB [d]')
-plt.ylabel('e-/s')
-plt.title("TESS Lightcurve - sector 24 (conservative selection)", fontsize=12)
-plt.legend()
-
-# ---------------------------------------------------
-# A) Calcolo delle posizioni (x) dove disegnare le 30 barre
-# ---------------------------------------------------
-min_time = np.min(time_array[conservative_selection])
-max_time = np.max(time_array[conservative_selection])
-
-# Creiamo 31 valori equispaziati (31 linee = 30 "intervalli")
-vertical_lines = np.linspace(min_time, max_time, 31)
-
-# Per posizionare le etichette in alto, prendiamo il massimo flusso
-# (o potremmo usare i limiti dell'asse y dopo il plot)
-max_flux = np.max(sap_flux[conservative_selection])
-
-# ---------------------------------------------------
-# B) Disegno delle linee e aggiunta etichette
-# ---------------------------------------------------
-for i, xline in enumerate(vertical_lines):
-    # Disegno la linea verticale
-    #plt.axvline(x=xline, color='gray', linestyle='--', alpha=0.5)
-
-
-    # Stampa in console il valore di x
-    print(f"Linea n.{i+1}: x = {xline:.4f}")
-
-plt.show()
+# 5. Print shapes and sample PDCSAP values
+# =============================================================================
+print(f"Number of BJD epochs  : {time_bjd.shape}")
+print(f"Number of SAP epochs  : {sap_flux.shape}")
+print(f"Number of PDCSAP epochs: {pdcsap_flux.shape}")
+print('Some elements of PDCSAP flux [10:20]:', pdcsap_flux[10:20])
 
 # =============================================================================
-print("\n\n 6.5. Optional manual exclusion of data ranges")
-print("=============================================================================\n")
+# 6. Conservative filtering and overview plot
+# =============================================================================
+finite = np.isfinite(pdcsap_flux)
+good_q = (quality == 0)
+mask_cons = finite & good_q
+print(f"Conservative: {mask_cons.sum()} / {len(mask_cons)} points kept.")
 
-"""
-If we notice transits or interesting features at times where data is partially excluded or 
-not good, we may manually exclude them as well.
+plt.figure(figsize=(8,4), dpi=120)
+plt.scatter(time_bjd[mask_cons], sap_flux[mask_cons],    s=6, label='SAP - selected')
+plt.scatter(time_bjd,               pdcsap_flux,          s=6, label='PDCSAP')
+plt.scatter(time_bjd[~mask_cons],   sap_flux[~mask_cons],  s=6, c='r', alpha=0.6, label='SAP - excluded')
+plt.errorbar(time_bjd[mask_cons], sap_flux[mask_cons], yerr=sap_err[mask_cons], fmt='none', alpha=0.5, ecolor='k', zorder=-1)
+plt.xlabel('BJD_TDB'); plt.ylabel('e-/s'); plt.title(f'Sector {sector}: conservative selection overview')
+plt.legend(); plt.grid(alpha=0.3)
+plt.tight_layout(); plt.show()
 
-For example, let's remove data before BJD_TDB > 2458981.75 as in the example.
-"""
+# =============================================================================
+# 7. Selective filtering (optional)
+# =============================================================================
+flags = [1,2,3,4,5,6,8,10,13,15]
+ref_mask = sum(2**(f-1) for f in flags)
+mask_sel = finite & (~(np.bitwise_and(quality, ref_mask)>0))
+print(f"Selective: kept {mask_sel.sum()} points (ref_mask={ref_mask}).")
 
-end_plot_and_final_selection =  2458961.0912 # fino alla linea 7
+# =============================================================================
+# 8. Segment markers
+# =============================================================================
+min_t, max_t = time_bjd[mask_cons].min(), time_bjd[mask_cons].max()
+segs = np.linspace(min_t, max_t, 31)
+fig, ax = plt.subplots(figsize=(8,3), dpi=120)
+ax.scatter(time_bjd[mask_cons], sap_flux[mask_cons], s=6)
+for i, x in enumerate(segs,1):
+    ax.axvline(x, linestyle='--', alpha=0.3)
+    print(f"Segment {i}: {x:.5f}")
+ax.set(xlabel='BJD_TDB', ylabel='Flux'); ax.grid(alpha=0.3)
+plt.tight_layout(); plt.show()
 
-final_selection = conservative_selection & (time_array > end_plot_and_final_selection)
+# =============================================================================
+# 9. Manual exclusion — definizione di cutoff e mask_final
+# =============================================================================
+# punto di taglio (esempio preso dal tuo secondo script)
+cutoff = 2458961.0912
 
-print("Numero di punti in final_selection:",
-      np.sum(final_selection), "su", len(final_selection))
+# mask_final: teniamo solo i punti che superano il cutoff, a partire da quelli già in mask_cons
+mask_final = mask_cons & (time_bjd > cutoff)
 
-# Plot again highlighting the manually excluded data
+print(f"Manual: {mask_final.sum()} punti finali su {len(mask_cons)} iniziali conservativi.")
+
+# =============================================================================
+# 9b. Manual exclusion — plot finale (corretto)
+# =============================================================================
 plt.figure(figsize=(8,4), dpi=300)
-plt.scatter(time_array[conservative_selection], sap_flux[conservative_selection],
-            s=5, label='SAP - selected data')
-plt.scatter(time_array, pdcsap_flux, s=5, label='PDCSAP')
 
-plt.scatter(time_array[~conservative_selection], sap_flux[~conservative_selection],
-            s=5, c='r', label='SAP - excluded data')
-plt.scatter(time_array[~final_selection & conservative_selection],
-            sap_flux[~final_selection & conservative_selection],
+# SAP selezionati (conservative selection)
+plt.scatter(time_bjd[mask_cons], sap_flux[mask_cons],
+            s=6, label='SAP - selected data')
+
+# PDCSAP grezzi
+plt.scatter(time_bjd, pdcsap_flux,
+            s=6, label='PDCSAP')
+
+# SAP esclusi per qualità
+plt.scatter(time_bjd[~mask_cons], sap_flux[~mask_cons],
+            s=6, c='r', label='SAP - excluded data')
+
+# SAP esclusi manualmente (tra quelli inizialmente validi)
+plt.scatter(time_bjd[~mask_final & mask_cons],
+            sap_flux[~mask_final & mask_cons],
             s=20, c='y', marker='x', label='SAP - manually excluded')
-plt.errorbar(time_array[conservative_selection], sap_flux[conservative_selection],
-             yerr=sap_flux_error[conservative_selection], fmt=' ', alpha=0.5,
-             ecolor='k', zorder=-1)
+
+# Barre di errore sui punti conservatively selezionati
+plt.errorbar(time_bjd[mask_cons], sap_flux[mask_cons],
+             yerr=sap_err[mask_cons], fmt=' ',
+             alpha=0.5, ecolor='k', zorder=-1)
 
 plt.xlabel('BJD_TDB [d]')
-plt.ylabel('e-/s')
-plt.title("TESS Lightcurve for qatar1 - sector 24 (final selection)", fontsize=12)
-plt.xlim(2458955.7942,  end_plot_and_final_selection)
+plt.ylabel('Flux [e⁻/s]')
+plt.title(f'TESS Lightcurve for qatar1 – sector {sector} (final selection)', fontsize=12)
+
+# Limiti di zoom: da inizio selezione conservativa fino al cutoff
+plt.xlim(min_t, cutoff)
+# Range di flusso scelta “a mano” per evidenziare la zona di interesse
 plt.ylim(2300, 2450)
 
 plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
 plt.show()
 
-# =============================================================================
-print("\n\n 6.6. Saving the selected data")
-print("=============================================================================\n")
 
-"""
-We save the final selected data into a pickle file for later analysis. 
-Remember to repeat this process for each sector you want to analyze.
-"""
-
-sector24_dictionary = {
-    'time': time_array[final_selection],
-    'sap_flux': sap_flux[final_selection],
-    'sap_flux_error': sap_flux_error[final_selection],
-    'pdcsap_flux': pdcsap_flux[final_selection],
-    'pdcsap_flux_error': pdcsap_flux_error[final_selection]
-}
-
-pickle.dump(sector24_dictionary, open(f'{tess_dir}/qatar1_TESS_sector024_selected.p','wb'))
-
-print("Saved the final selected data for sector 24 in qatar1_TESS_sector024_selected.p")
-print("All steps completed.")
