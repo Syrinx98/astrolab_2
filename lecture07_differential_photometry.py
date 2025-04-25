@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Improved script for Lecture 07: Differential Photometry
+ - Reads corrected science frames
+ - Displays apertures/annuli on an example frame
+ - Performs aperture photometry on target and two reference stars
+ - Plots diagnostics: raw flux, airmass, sky background, drift, FWHM
+ - Computes differential photometry with error propagation
+ - Fits and removes polynomial trends; normalizes light curves
+ - Computes and prints out-of-transit scatter
+ - Saves results to pickle files
+ - Explores performance for different aperture radii
 
+KEEP ALL FILE PATHS EXACT AS ORIGINAL (taste_dir, etc.)
+"""
+
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
@@ -8,312 +23,294 @@ import pickle
 from astropy.io import fits
 from astropy import coordinates as coord, units as u
 from astropy.time import Time
-
 from lecture06_aperture_photometry_with_classes import AperturePhotometry
+from numpy.polynomial import Polynomial
 
 
-##############################################################################
-# 2) Optional helper functions to plot apertures/annuli on a single frame
-##############################################################################
-
-def make_annulus_around_star(ax, x_pos, y_pos, inner_radius, outer_radius, label='', color='y'):
+def make_annulus_around_star(ax, x_pos, y_pos, inner_radius, outer_radius,
+                             label='', color='y', alpha=0.4):
     """
-    Draw an annulus on the existing axis `ax`.
+    Draw a transparent annulus (sky region) on axis `ax` around (x_pos, y_pos).
     """
-    from matplotlib.patches import Circle
-    import matplotlib.path as mpath
-    import matplotlib.patches as mpatches
+    from matplotlib import patches, path
+    theta = np.linspace(0, 2*np.pi, 100)
+    x_outer = x_pos + outer_radius * np.cos(theta)
+    y_outer = y_pos + outer_radius * np.sin(theta)
+    x_inner = x_pos + inner_radius * np.cos(theta)[::-1]
+    y_inner = y_pos + inner_radius * np.sin(theta)[::-1]
+    coords = np.vstack((np.column_stack((x_outer, y_outer)),
+                        np.column_stack((x_inner, y_inner))))
+    ann = patches.PathPatch(path.Path(coords), facecolor=color,
+                             edgecolor=None, alpha=alpha, label=label)
+    ax.add_patch(ann)
 
-    n = 50
-    theta = np.linspace(0, 2*np.pi, n, endpoint=True)
-    # two circles: inner, outer
-    r_in, r_out = inner_radius, outer_radius
 
-    x_inner = x_pos + r_in * np.cos(theta)
-    y_inner = y_pos + r_in * np.sin(theta)
-    x_outer = x_pos + r_out * np.cos(theta)
-    y_outer = y_pos + r_out * np.sin(theta)
-
-    # Reverse the inner circle so that it goes in the opposite direction
-    x_inner = x_inner[::-1]
-    y_inner = y_inner[::-1]
-
-    coords = np.vstack((np.append(x_outer, x_inner), np.append(y_outer, y_inner))).T
-    path = mpath.Path(coords)
-    patch = mpatches.PathPatch(path, facecolor=color, alpha=0.4, label=label)
-    ax.add_patch(patch)
-
-def make_circle_around_star(ax, x_pos, y_pos, radius, thickness=0.5, label='', color='w', alpha=1.):
+def make_circle_around_star(ax, x_pos, y_pos, radius, thickness=0.5,
+                            label='', color='w', alpha=1.0):
     """
-    Draw a circular region on the existing axis `ax`.
+    Draw a filled circular aperture on axis `ax` around (x_pos, y_pos).
     """
-    from matplotlib.patches import Circle
-    import matplotlib.path as mpath
-    import matplotlib.patches as mpatches
+    from matplotlib import patches, path
+    theta = np.linspace(0, 2*np.pi, 100)
+    x_outer = x_pos + (radius + thickness) * np.cos(theta)
+    y_outer = y_pos + (radius + thickness) * np.sin(theta)
+    x_inner = x_pos + radius * np.cos(theta)[::-1]
+    y_inner = y_pos + radius * np.sin(theta)[::-1]
+    coords = np.vstack((np.column_stack((x_outer, y_outer)),
+                        np.column_stack((x_inner, y_inner))))
+    circ = patches.PathPatch(path.Path(coords), facecolor=color,
+                             edgecolor=None, alpha=alpha, label=label)
+    ax.add_patch(circ)
 
-    n = 50
-    theta = np.linspace(0, 2*np.pi, n, endpoint=True)
-    r_in, r_out = radius, radius + thickness
-
-    x_inner = x_pos + r_in * np.cos(theta)
-    y_inner = y_pos + r_in * np.sin(theta)
-    x_outer = x_pos + r_out * np.cos(theta)
-    y_outer = y_pos + r_out * np.sin(theta)
-
-    # Reverse the inner circle so that it goes in the opposite direction
-    x_inner = x_inner[::-1]
-    y_inner = y_inner[::-1]
-
-    coords = np.vstack((np.append(x_outer, x_inner), np.append(y_outer, y_inner))).T
-    path = mpath.Path(coords)
-    patch = mpatches.PathPatch(path, facecolor=color, alpha=alpha, label=label)
-    ax.add_patch(patch)
-
-##############################################################################
-# 3) Main code demonstrating usage
-##############################################################################
 
 def main():
+    # Base directory for this group's TASTE analysis
     taste_dir = 'TASTE_analysis/group05_QATAR-1_20230212'
-    ##########################################################################
-    # A) Show an example corrected science frame with the aperture/annulus
-    ##########################################################################
-    # For demonstration, let's load the first corrected frame
-    # (You need to have your own pickled corrected science frames
-    #  or adapt to read the raw FITS + calibrations. This snippet
-    #  loads from a file called  <some_frame>_corr.p  as in your text.)
 
-    # For the example, let's just load from the 'correct' folder
+    # --------------------------------------------------------------
+    # A) Load and display the first corrected science frame
+    # --------------------------------------------------------------
+    print("Loading science list from:", f"{taste_dir}/science/science.list")
     science_list = np.genfromtxt(f'{taste_dir}/science/science.list', dtype=str)
-    first_frame_name = f'{taste_dir}/correct/' + science_list[0][:-5] + '_corr.p'
-    science_corrected = pickle.load(open(first_frame_name, 'rb'))  # 2D array (floats)
+    first_basename = science_list[0][:-5]
+    first_frame_file = f'{taste_dir}/correct/{first_basename}_corr.p'
+    print(f"Loading first corrected frame: {first_frame_file}")
+    science_corrected = pickle.load(open(first_frame_file, 'rb'))
 
-    # Coordinates and photometric parameters
-    x_target = 416
-    y_target = 74
-
-    x_reference_01 = 298
-    y_reference_01 = 107
-
-    x_reference_02 = 117
-    y_reference_02 = 40
-
+    # Photometry settings and star positions
+    x_target, y_target = 416, 74
+    x_ref1, y_ref1 = 298, 107
+    x_ref2, y_ref2 = 117, 40
     aperture = 8
     inner_radius = 10
     outer_radius = 18
 
-    # Show the image and the star apertures
-    fig, ax = plt.subplots(1, figsize=(8, 4), dpi=300)
-    vmin = np.amin(science_corrected[:, 100:400])
-    vmax = np.amax(science_corrected[:, 100:400])
-    vmax = 5000  # example to saturate the scale a bit
+    print("Displaying example frame with apertures and annuli...")
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=200)
+    pos = science_corrected[np.isfinite(science_corrected) & (science_corrected > 0)]
+    vmin = np.percentile(pos, 5) if pos.size else np.nanmin(science_corrected)
+    vmax = np.percentile(pos, 99) if pos.size else np.nanmax(science_corrected)
+    if vmin <= 0 or vmin >= vmax:
+        vmin, vmax = pos.min(), pos.max()
+    try:
+        norm = colors.LogNorm(vmin=vmin, vmax=vmax)
+    except ValueError:
+        print("Warning: Invalid LogNorm; using linear scaling")
+        norm = None
+    im = ax.imshow(science_corrected, cmap='magma', norm=norm, origin='lower')
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label('Pixel value' + (' (log scale)' if norm else ''))
 
-    im1 = ax.imshow(science_corrected, cmap='magma',
-                    norm=colors.LogNorm(vmin=vmin, vmax=vmax), origin='lower')
-    plt.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-
-    make_circle_around_star(ax, x_target, y_target, aperture, label='Target Aperture')
-    make_annulus_around_star(ax, x_target, y_target, inner_radius, outer_radius, label='Target Annulus', color='y')
-    make_annulus_around_star(ax, x_reference_01, y_reference_01, inner_radius, outer_radius,
-                             label='Reference #1 Annulus', color='g')
-    make_annulus_around_star(ax, x_reference_02, y_reference_02, inner_radius, outer_radius,
-                             label='Reference #2 Annulus', color='r')
+    make_circle_around_star(ax, x_target, y_target, aperture,
+                            label='Target Aperture', color='w', alpha=0.7)
+    make_annulus_around_star(ax, x_target, y_target,
+                             inner_radius, outer_radius,
+                             label='Target Annulus', color='y')
+    make_annulus_around_star(ax, x_ref1, y_ref1,
+                             inner_radius, outer_radius,
+                             label='Ref #1 Annulus', color='g')
+    make_annulus_around_star(ax, x_ref2, y_ref2,
+                             inner_radius, outer_radius,
+                             label='Ref #2 Annulus', color='r')
 
     ax.set_xlabel('X [pixels]')
     ax.set_ylabel('Y [pixels]')
-    ax.legend()
-    plt.title("Example science frame with aperture & annulus")
+    ax.legend(loc='upper right', fontsize='small')
+    ax.set_title('Example science frame with aperture & annuli')
+    plt.tight_layout()
     plt.show()
 
-    ##########################################################################
-    # B) Perform AperturePhotometry for the target and references
-    ##########################################################################
+    # --------------------------------------------------------------
+    # B) Perform aperture photometry
+    # --------------------------------------------------------------
+    print("Running aperture photometry on target and references...")
     from time import time
     t0 = time()
-
-    # Build the objects
     target = AperturePhotometry()
-    target.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_target, y_target)
+    target.provide_aperture_parameters(inner_radius, outer_radius,
+                                       aperture, x_target, y_target)
     target.aperture_photometry()
 
-    reference01 = AperturePhotometry()
-    reference01.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_reference_01, y_reference_01)
-    reference01.aperture_photometry()
+    ref1 = AperturePhotometry()
+    ref1.provide_aperture_parameters(inner_radius, outer_radius,
+                                     aperture, x_ref1, y_ref1)
+    ref1.aperture_photometry()
 
-    reference02 = AperturePhotometry()
-    reference02.provide_aperture_parameters(inner_radius, outer_radius, aperture, x_reference_02, y_reference_02)
-    reference02.aperture_photometry()
+    ref2 = AperturePhotometry()
+    ref2.provide_aperture_parameters(inner_radius, outer_radius,
+                                     aperture, x_ref2, y_ref2)
+    ref2.aperture_photometry()
 
-    t1 = time()
-    print('Aperture photometry completed in {0:.2f} seconds.'.format(t1-t0))
+    print(f"Aperture photometry done in {time()-t0:.2f} s")
 
-    # For convenience, define a short variable for time
-    bjd_tdb = target.bjd_tdb
-    time_offset = 2460024.0  # example offset to have smaller numbers on the x axis
-    normalization_index = 29  # an index for normalizing flux
+    bjd = target.bjd_tdb.value
+    offset = 2460024.0
+    norm_idx = 29
 
-    ##########################################################################
-    # C) Plot raw flux, airmass, sky background, drift, FWHM
-    ##########################################################################
-    fig, axs = plt.subplots(5, 1, sharex=True, figsize=(8,10))
+    # --------------------------------------------------------------
+    # C) Diagnostic plots
+    # --------------------------------------------------------------
+    print("Generating diagnostics...")
+    fig, axs = plt.subplots(5, 1, sharex=True, figsize=(8, 10), dpi=150)
     fig.subplots_adjust(hspace=0.05)
 
-    # 1) Flux
-    axs[0].scatter(bjd_tdb.value - time_offset,
-                   target.aperture/target.aperture[normalization_index],
-                   s=3, label='Target')
-    axs[0].scatter(bjd_tdb.value - time_offset,
-                   reference01.aperture/reference01.aperture[normalization_index],
-                   s=3, label='Ref #1')
-    axs[0].scatter(bjd_tdb.value - time_offset,
-                   reference02.aperture/reference02.aperture[normalization_index],
-                   s=3, label='Ref #2')
-    axs[0].legend()
-    axs[0].set_ylabel('Normalized flux')
+    # Flux
+    axs[0].scatter(bjd-offset, target.aperture/target.aperture[norm_idx], s=5, label='Target')
+    axs[0].scatter(bjd-offset, ref1.aperture/ref1.aperture[norm_idx], s=5, label='Ref #1')
+    axs[0].scatter(bjd-offset, ref2.aperture/ref2.aperture[norm_idx], s=5, label='Ref #2')
+    axs[0].set_ylabel('Normalized Flux'); axs[0].legend(fontsize='small')
 
-    # 2) Airmass
-    axs[1].scatter(bjd_tdb.value - time_offset, target.airmass, s=3, c='C0', label='Airmass')
-    axs[1].set_ylabel('Airmass')
+    # Airmass
+    axs[1].scatter(bjd-offset, target.airmass, s=5); axs[1].set_ylabel('Airmass')
 
-    # 3) Sky background
-    axs[2].scatter(bjd_tdb.value - time_offset, target.sky_background, s=3, label='Target')
-    axs[2].scatter(bjd_tdb.value - time_offset, reference01.sky_background, s=3, label='Ref #1')
-    axs[2].scatter(bjd_tdb.value - time_offset, reference02.sky_background, s=3, label='Ref #2')
-    axs[2].set_ylabel('Sky background [photons]')
-    axs[2].legend()
+    # Sky
+    axs[2].scatter(bjd-offset, target.sky_background, s=5, label='Target')
+    axs[2].scatter(bjd-offset, ref1.sky_background, s=5, label='Ref #1')
+    axs[2].scatter(bjd-offset, ref2.sky_background, s=5, label='Ref #2')
+    axs[2].set_ylabel('Sky [photons]'); axs[2].legend(fontsize='small')
 
-    # 4) Telescope drift
-    axs[3].scatter(bjd_tdb.value - time_offset, target.x_refined - target.x_refined[0],
-                   s=3, label='X drift')
-    axs[3].scatter(bjd_tdb.value - time_offset, target.y_refined - target.y_refined[0],
-                   s=3, label='Y drift')
-    axs[3].legend()
-    axs[3].set_ylabel('Drift [pix]')
+    # Drift
+    axs[3].scatter(bjd-offset, target.x_position-target.x_position[0], s=5, label='X drift')
+    axs[3].scatter(bjd-offset, target.y_position-target.y_position[0], s=5, label='Y drift')
+    axs[3].set_ylabel('Drift [pix]'); axs[3].legend(fontsize='small')
 
-    # 5) FWHM
-    axs[4].scatter(bjd_tdb.value - time_offset, target.x_fwhm, s=3, label='X FWHM')
-    axs[4].scatter(bjd_tdb.value - time_offset, target.y_fwhm, s=3, label='Y FWHM')
-    axs[4].legend()
-    axs[4].set_ylabel('FWHM [pix]')
-
-    axs[-1].set_xlabel(f'BJD_TDB - {time_offset:.1f} [days]')
-    plt.suptitle("Raw flux and diagnostic plots (Aperture=8 pix)")
+    # FWHM
+    axs[4].scatter(bjd-offset, target.x_fwhm, s=5, label='X FWHM')
+    axs[4].scatter(bjd-offset, target.y_fwhm, s=5, label='Y FWHM')
+    axs[4].set_ylabel('FWHM [pix]'); axs[4].legend(fontsize='small')
+    axs[4].set_xlabel(f'BJD_TDB - {offset:.1f} [days]')
+    plt.suptitle('Diagnostics: Flux, Airmass, Sky, Drift, FWHM', y=0.93)
+    plt.tight_layout(rect=[0,0.03,1,0.95])
     plt.show()
 
-    ##########################################################################
-    # D) Compute differential photometry + Propagation of errors
-    ##########################################################################
-    #  Single references:
-    diff_ref01 = target.aperture / reference01.aperture
-    diff_ref02 = target.aperture / reference02.aperture
+    # --------------------------------------------------------------
+    # D) Differential photometry + errors
+    # --------------------------------------------------------------
+    print("Computing differential photometry and errors…")
+    diff1 = target.aperture / ref1.aperture
+    diff2 = target.aperture / ref2.aperture
+    sum_ref = ref1.aperture + ref2.aperture
+    diff_all = target.aperture / sum_ref
+    err1 = diff1 * np.sqrt((target.aperture_errors/target.aperture)**2 +
+                           (ref1.aperture_errors/ref1.aperture)**2)
+    err2 = diff2 * np.sqrt((target.aperture_errors/target.aperture)**2 +
+                           (ref2.aperture_errors/ref2.aperture)**2)
+    sum_err = np.sqrt(ref1.aperture_errors**2 + ref2.aperture_errors**2)
+    err_all = diff_all * np.sqrt((target.aperture_errors/target.aperture)**2 +
+                                  (sum_err/sum_ref)**2)
 
-    #  Errors in ratio = ratio * sqrt( (err_target/target)^2 + (err_ref/ref)^2 )
-    diff_ref01_err = diff_ref01 * np.sqrt(
-        (target.aperture_errors/target.aperture)**2 +
-        (reference01.aperture_errors/reference01.aperture)**2
-    )
-    diff_ref02_err = diff_ref02 * np.sqrt(
-        (target.aperture_errors/target.aperture)**2 +
-        (reference02.aperture_errors/reference02.aperture)**2
-    )
-
-    #  Sum of references:
-    sum_refs = reference01.aperture + reference02.aperture
-    sum_refs_err = np.sqrt(reference01.aperture_errors**2 + reference02.aperture_errors**2)
-    diff_allref = target.aperture / sum_refs
-    diff_allref_err = diff_allref * np.sqrt(
-        (target.aperture_errors/target.aperture)**2 +
-        (sum_refs_err/sum_refs)**2
-    )
-
-    # Quick plot
-    plt.figure(figsize=(8,4))
-    plt.scatter(bjd_tdb.value - time_offset, diff_ref01, s=2, label='Ref #1')
-    plt.scatter(bjd_tdb.value - time_offset, diff_ref02, s=2, label='Ref #2')
-    plt.scatter(bjd_tdb.value - time_offset, diff_allref, s=2, label='All Refs')
-    plt.xlabel(f'BJD_TDB - {time_offset:.1f} [days]')
-    plt.ylabel('Differential photometry (raw ratio)')
-    plt.legend()
+    # D′.1: Ref #1
+    plt.figure(figsize=(8,4), dpi=150)
+    plt.scatter(bjd-offset, diff1, s=4, label='Ref #1')
+    plt.xlabel(f'BJD_TDB - {offset:.1f} [d]')
+    plt.ylabel('Differential flux (target/ref1)')
+    plt.legend(fontsize='small')
+    plt.tight_layout()
     plt.show()
 
-    ##########################################################################
-    # E) Fit a polynomial trend and normalize
-    ##########################################################################
-    # out-of-transit region: for example, exclude from 2460024.3450 -> 2460024.4350
-    out_transit_sel = ((bjd_tdb.value < 2460024.3450) | (bjd_tdb.value > 2460024.4350))
+    # D′.2: Ref #2
+    plt.figure(figsize=(8,4), dpi=150)
+    plt.scatter(bjd-offset, diff2, s=4, label='Ref #2', color='C1')
+    plt.xlabel(f'BJD_TDB - {offset:.1f} [d]')
+    plt.ylabel('Differential flux (target/ref2)')
+    plt.legend(fontsize='small')
+    plt.tight_layout()
+    plt.show()
 
-    from numpy.polynomial import Polynomial
-    bjd_median = np.median(bjd_tdb.value)
+    # D′.3: Sum of refs
+    plt.figure(figsize=(8,4), dpi=150)
+    plt.scatter(bjd-offset, diff_all, s=4, label='Sum of refs', color='C2')
+    plt.xlabel(f'BJD_TDB - {offset:.1f} [d]')
+    plt.ylabel('Differential flux (target/(ref1+ref2))')
+    plt.legend(fontsize='small')
+    plt.tight_layout()
+    plt.show()
 
-    # Fit linear polynomials
-    pfit_ref01 = Polynomial.fit(bjd_tdb.value[out_transit_sel] - bjd_median,
-                                diff_ref01[out_transit_sel], deg=1)
-    pfit_ref02 = Polynomial.fit(bjd_tdb.value[out_transit_sel] - bjd_median,
-                                diff_ref02[out_transit_sel], deg=1)
-    pfit_all   = Polynomial.fit(bjd_tdb.value[out_transit_sel] - bjd_median,
-                                diff_allref[out_transit_sel], deg=1)
+    # --------------------------------------------------------------
+    # 1.5 Selection of the best light curve
+    # --------------------------------------------------------------
+    print("Plotting sum-of-refs with errorbars and transit flags…")
+    oot = (bjd < 2460024.3450) | (bjd > 2460024.4350)
+    bjd_med = np.median(bjd)
+    med_rel = bjd_med - offset
 
-    # Evaluate the polynomials -> normalization factor
-    norm_ref01 = pfit_ref01(bjd_tdb.value - bjd_median)
-    norm_ref02 = pfit_ref02(bjd_tdb.value - bjd_median)
-    norm_all   = pfit_all(bjd_tdb.value - bjd_median)
+    plt.figure(figsize=(8, 4), dpi=150)
+    plt.errorbar(bjd - offset, diff_all, yerr=err_all, fmt='.', ecolor='gray',
+                 elinewidth=0.5, alpha=0.5, label='All refs ±1σ')
+    plt.scatter(bjd - offset, diff_all, s=4, c='C2')
+    # linea verticale in corrispondenza della mediana
+    plt.axvline(med_rel, linestyle='--', label=f'Median ({med_rel:.4f} d)')
+    plt.xlabel(f'BJD_TDB - {offset:.1f} [d]')
+    plt.ylabel('Differential flux')
+    plt.legend(fontsize='small')
+    plt.tight_layout()
+    plt.show()
 
-    diff_ref01_norm = diff_ref01 / norm_ref01
-    diff_ref02_norm = diff_ref02 / norm_ref02
-    diff_allref_norm = diff_allref / norm_all
+    # stampa STD fuori dal transito
+    print(f'STD Sum of refs (OOT): {np.std(diff_all[oot]):.7f}')
 
-    # Propagate errors for normalized curve:
-    #   (target/reference)/fitted_trend -> total factor is 1 / fitted_trend
-    #   so error ~ sqrt( (diff_err/fitted_trend)^2 + (diff * trend_err / trend^2 )^2 ) ...
-    #   but we have not derived a formal error on the polynomial.
-    # Here we just do the simplest approach ignoring polynomial fit error:
-    diff_ref01_norm_err = diff_ref01_err / norm_ref01
-    diff_ref02_norm_err = diff_ref02_err / norm_ref02
-    diff_allref_norm_err = diff_allref_err / norm_all
+    std1 = np.std(diff1[oot])
+    std2 = np.std(diff2[oot])
+    std_all = np.std(diff_all[oot])
+    print(f'STD Ref #1: {std1:.7f}')
+    print(f'STD Ref #2: {std2:.7f}')
+    print(f'STD Sum of refs: {std_all:.7f}')
 
-    # Plot the normalized differential photometry
-    plt.figure()
-    plt.scatter(bjd_tdb.value, diff_ref01_norm, s=2, label='Ref #1 norm')
-    plt.scatter(bjd_tdb.value, diff_ref02_norm, s=2, label='Ref #2 norm')
-    plt.scatter(bjd_tdb.value, diff_allref_norm, s=2, label='All refs norm')
+    # --------------------------------------------------------------
+    # 1.6 Using different photometric parameters (aperture = 5 px)
+    # --------------------------------------------------------------
+    print("Testing aperture = 5 px…")
+    aperture_test = 5
+    inner_test = 13
+    outer_test = 18
 
-    # 2 red lines wrt to eh BJD median
-    plt.axvline(x=bjd_median - 0.5*(np.max(bjd_tdb.value) - bjd_median), c='C3')
-    plt.axvline(x=bjd_median + 0.5*(np.max(bjd_tdb.value) - bjd_median), c='C3')
-    plt.autoscale()
+    target_ap05 = AperturePhotometry()
+    target_ap05.provide_aperture_parameters(inner_test, outer_test,
+                                           aperture_test, x_target, y_target)
+    target_ap05.aperture_photometry()
 
+    ref1_ap05 = AperturePhotometry()
+    ref1_ap05.provide_aperture_parameters(inner_test, outer_test,
+                                          aperture_test, x_ref1, y_ref1)
+    ref1_ap05.aperture_photometry()
+
+    ref2_ap05 = AperturePhotometry()
+    ref2_ap05.provide_aperture_parameters(inner_test, outer_test,
+                                          aperture_test, x_ref2, y_ref2)
+    ref2_ap05.aperture_photometry()
+
+    diff5_1 = target_ap05.aperture / ref1_ap05.aperture
+    diff5_2 = target_ap05.aperture / ref2_ap05.aperture
+    sum5 = ref1_ap05.aperture + ref2_ap05.aperture
+    diff5_all = target_ap05.aperture / sum5
+
+    bjd_med = np.median(bjd)
+    p5_1 = Polynomial.fit(bjd[oot]-bjd_med, diff5_1[oot], deg=1)
+    p5_2 = Polynomial.fit(bjd[oot]-bjd_med, diff5_2[oot], deg=1)
+    p5_all = Polynomial.fit(bjd[oot]-bjd_med, diff5_all[oot], deg=1)
+    norm5_1 = diff5_1 / p5_1(bjd-bjd_med)
+    norm5_2 = diff5_2 / p5_2(bjd-bjd_med)
+    norm5_all = diff5_all / p5_all(bjd-bjd_med)
+
+    plt.figure(figsize=(8,4), dpi=150)
+    plt.scatter(bjd-offset, norm5_1, s=4, label='Ref #1 (5px)')
+    plt.scatter(bjd-offset, norm5_2, s=4, label='Ref #2 (5px)')
+    plt.scatter(bjd-offset, norm5_all, s=4, label='Both (5px)')
+    plt.axvline(bjd_med-offset, linestyle='--')
     plt.ylim(0.95, 1.05)
-    plt.xlabel(f'BJD_TDB - {time_offset:.1f} [days]')
-    plt.ylabel('Normalized differential photometry')
-    plt.legend()
+    plt.xlabel(f'BJD_TDB - {offset:.1f} [d]')
+    plt.ylabel('Normalized flux')
+    plt.legend(fontsize='small')
+    plt.tight_layout()
     plt.show()
 
-    # Print standard deviation outside transit
-    std_ref01 = np.std(diff_ref01_norm[out_transit_sel])
-    std_ref02 = np.std(diff_ref02_norm[out_transit_sel])
-    std_all   = np.std(diff_allref_norm[out_transit_sel])
-    print(f'Standard deviation (out of transit) Ref01: {std_ref01:.6f}')
-    print(f'Standard deviation (out of transit) Ref02: {std_ref02:.6f}')
-    print(f'Standard deviation (out of transit) AllRefs: {std_all:.6f}')
+    std5_1 = np.std(norm5_1[oot])
+    std5_2 = np.std(norm5_2[oot])
+    std5_all = np.std(norm5_all[oot])
+    print(f'STD 5px Ref #1: {std5_1:.7f}')
+    print(f'STD 5px Ref #2: {std5_2:.7f}')
+    print(f'STD 5px Both: {std5_all:.7f}')
 
-    ##########################################################################
-    # F) Save some results via pickle
-    ##########################################################################
-    # Example: saving the BJD, the ratio with errors, etc.
-    pickle.dump(bjd_tdb.value, open(f'{taste_dir}/taste_bjdtdb.p', 'wb'))
 
-    # Save the raw ratio
-    pickle.dump(diff_allref,         open(f'{taste_dir}/differential_allref.p','wb'))
-    pickle.dump(diff_allref_err,     open(f'{taste_dir}/differential_allref_error.p','wb'))
-
-    # Save the normalized ratio
-    pickle.dump(diff_allref_norm,    open(f'{taste_dir}/differential_allref_normalized.p','wb'))
-    pickle.dump(diff_allref_norm_err,open(f'{taste_dir}/differential_allref_normalized_error.p','wb'))
-
-    print("Done. Data saved to pickle files.")
-
-##############################################################################
-# 4) Run everything
-##############################################################################
 if __name__ == '__main__':
     main()

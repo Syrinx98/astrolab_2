@@ -194,6 +194,19 @@ class AperturePhotometry:
         ltt = t.light_travel_time(self.target, ephemeris='jpl')
         self.bjd_tdb = t.tdb + ltt
         print("Done.\n")
+        self.detrend_light_curve()
+
+    def detrend_light_curve(self):
+        # Compute BJD_TDB mid-exposure
+        bjd = self.bjd_tdb.value
+        flux = self.aperture
+        # Normalize the flux around its median
+        rel_flux = flux / np.median(flux)
+        # Fit linear trend vs BJD_TDB
+        coeff = np.polyfit(bjd, rel_flux, 1)
+        baseline = np.polyval(coeff, bjd)
+        self.detrended_flux = rel_flux / baseline
+        print("Light curve detrended.")
 
 
 if __name__ == "__main__":
@@ -215,15 +228,8 @@ if __name__ == "__main__":
     plt.title("Raw Aperture Photometry"); plt.grid(True); plt.tight_layout()
     plt.show()
 
-    # ---- Detrending: remove linear slope via time fit ----
-    # 1) Normalize around median
-    rel_flux = flux / np.median(flux)
-    # 2) Fit and remove linear trend in time
-    coeff = np.polyfit(bjd, rel_flux, 1)
-    baseline = np.polyval(coeff, bjd)
-    detr_flux = rel_flux / baseline
-
-    # 3) Plot detrended curve
+    # Plot detrended light curve (moved detrending inside class)
+    detr_flux = target_star.detrended_flux
     plt.figure(figsize=(10,6))
     plt.scatter(bjd, detr_flux, s=5, alpha=0.6)
     plt.axhline(1.0, color='k', linestyle='--')
