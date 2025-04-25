@@ -1,368 +1,230 @@
-"""
-2 Flat Analysis
-"""
 import pickle
-
 import numpy as np
 from astropy.io import fits
 from matplotlib import pyplot as plt
 
 # =============================================================================
-print("\n\n2.1 Read the data")
-print("=============================================================================\n")
+# 2 Flat Analysis
+# =============================================================================
 
-"""
-2.1 Read the data
 
-We read the list of bias frames in the usual way
-"""
+# ----------------------------------------------------------------------------
+# 2.1 Read the data
+# ----------------------------------------------------------------------------
+print("\n\n=== 2.1 Read the data ===")
+# Directory containing the dataset (preserve as provided)
 taste_dir = 'TASTE_analysis/group05_QATAR-1_20230212'
 
+# Load list of flat frames
 flat_list = np.genfromtxt(f'{taste_dir}/flat/flat.list', dtype=str)
-print(flat_list)
+print(f"Found {len(flat_list)} flat frames:\n{flat_list}")
 
-"""
-We also need to open the median bias and copy the estimates for the error associated
-with the bias and the readout noise obtained when analyzing the bias frames. For this
-example, I will use the following values from the lecture01_bias_analysis
-"""
-
+# Load median bias and bias statistics from previous analysis
 median_bias = pickle.load(open(f"{taste_dir}/bias/median_bias.p", "rb"))
-bias_std = 1.3  # [e] photoelectrons
-readout_noise = 7.4  # [e] photoelectrons
-gain = 1.91  # [e/ADU]
+bias_std = 1.3  # [e-] error on median bias
+readout_noise = 7.4  # [e-] readout noise
+gain = 1.91  # [e-/ADU]
 
-flat00_fits = fits.open(f'{taste_dir}/flat/' + flat_list[0])
-flat00_data = flat00_fits[0].data * gain
+# Open first flat frame to examine header and data
+with fits.open(f'{taste_dir}/flat/{flat_list[0]}') as hdul:
+    header = hdul[0].header
+    flat00_data = hdul[0].data * gain
 
-print(
-    'CCD Gain         : {0:4.2f} {1:.8s}'.format(flat00_fits[0].header['GAIN'], flat00_fits[0].header.comments['GAIN']))
-print('CCD Readout noise: {0:4.2f} {1:.3s}'.format(flat00_fits[0].header['RDNOISE'],
-                                                   flat00_fits[0].header.comments['RDNOISE']))
-print('Shape of the FITS image from the header : {0:4d} x {1:4d} pixels'.format(flat00_fits[0].header['NAXIS1'],
-                                                                                flat00_fits[0].header['NAXIS2']))
+# Print CCD characteristics from header
+print(f"CCD Gain         : {header['GAIN']:.2f} {header.comments['GAIN']}")
+print(f"CCD Readout noise: {header['RDNOISE']:.2f} {header.comments['RDNOISE']}")
+print(f"Image shape      : {header['NAXIS1']} x {header['NAXIS2']} pixels")
 
-# =============================================================================
-print("\n\n2.2 Overscan")
-print("=============================================================================\n")
+# ----------------------------------------------------------------------------
+# 2.2 Overscan inspection
+# ----------------------------------------------------------------------------
+print("\n\n=== 2.2 Overscan inspection ===")
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+im = ax1.imshow(flat00_data, origin='lower')
+median_column = np.mean(flat00_data, axis=0)
+ax2.plot(median_column)
 
-"""
-2.2 Overscan
+# Add colorbar
+cbar = fig.colorbar(im, ax=[ax1], fraction=0.046, pad=0.04)
+cbar.set_label("Signal [e-]")
 
-It's always a good idea to visually inspect your data. If we let matplotlib automatically choose the range of the 
-colorbar, and we plot the average distribution of counts as a function of the column number, 
-we can see that there are two strips on the side of the image with a much lower number of counts. 
-Each column takes the name of overscan.
-"""
-
-fig, ax = plt.subplots(2, 1, figsize=(8, 6))  # Caution, figsize will also influence positions.
-im1 = ax[0].imshow(flat00_data, origin='lower')
-median_column = np.average(flat00_data, axis=0)
-im2 = ax[1].plot(median_column)
-
-# add the colorbar using the figure's method,
-# telling which mappable we're talking about and
-# which axes object it should be near
-cbar = fig.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-cbar.set_label("e")
-
-ax[0].set_xlabel('X [pixels]')
-ax[0].set_ylabel('Y [pixels]')
-
-ax[1].set_xlabel('X [pixels]')
-ax[1].set_ylabel('Y [pixels]')
+ax1.set_title('Flat Frame with Overscan Regions')
+ax1.set_xlabel('X [pixels]')
+ax1.set_ylabel('Y [pixels]')
+ax2.set_title('Average Counts per Column')
+ax2.set_xlabel('X [pixels]')
+ax2.set_ylabel('Average Signal [e-]')
+plt.tight_layout()
 plt.show()
 
-# =============================================================================
+# ----------------------------------------------------------------------------
+# 2.3 Exclude overscan from statistics
+# ----------------------------------------------------------------------------
+print("\n\n=== 2.3 Exclude overscan ===")
+# Determine vmin/vmax excluding 12-pixel-wide overscan on each side
+vmin = np.min(flat00_data[:, 12:-12])
+vmax = np.max(flat00_data[:, 12:-12])
+print(f"Display range (excluding overscan): vmin = {vmin:.2f}, vmax = {vmax:.2f}")
 
-print("\n\n2.3 Properly dealing with the entire frame")
-print("=============================================================================\n")
+fig, (ax3, ax4) = plt.subplots(2, 1, figsize=(8, 6))
+im2 = ax3.imshow(flat00_data, origin='lower', vmin=vmin, vmax=vmax)
+median_column2 = np.mean(flat00_data, axis=0)
+ax4.plot(median_column2)
+ax4.set_ylim(vmin, vmax)
 
-"""
-2.3 Properly dealing with the entire frame
+cbar2 = fig.colorbar(im2, ax=[ax3], fraction=0.046, pad=0.04)
+cbar2.set_label("Signal [e-]")
 
-The overscan regions do not impact our data reduction and science analysis, but their presence is annoying when 
-performing statistics on the full frame or displaying it. There are (at least) two ways to deal with this problem:
-
-We can trim the outer columns from all images and save the trimmed frames as new frames.
-we can exclude the outer columns from the analysis when computing full-frame statistics and visualization.
-The first approach is well-diffused, but you need software that propagates the metadata (e.g., header, comments) 
-into the new files. You also have to be sure to apply the same overscan cuts every time you reduce a new frame. 
-You may also need extra space to store all the new images. The second approach requires just a bit of attention.
-
-Let's plot our frame again, but first, we compute the minimum and maximum values of our counts, excluding the overscan regions.
-"""
-
-vmin = np.amin(flat00_data[:, 12:-12])
-vmax = np.amax(flat00_data[:, 12:-12])
-print(vmin, vmax)
-
-fig, ax = plt.subplots(2, 1, figsize=(8, 6))  # Caution, figsize will also influence positions.
-im1 = ax[0].imshow(flat00_data, origin='lower', vmin=vmin, vmax=vmax)
-median_column = np.average(flat00_data, axis=0)
-im2 = ax[1].plot(median_column)
-
-# we set the plot limits
-ax[1].set_ylim(vmin, vmax)
-
-# add the colorbar using the figure's method,
-# telling which mappable we're talking about and
-# which axes object it should be near
-cbar = fig.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-cbar.set_label("e")
-
-ax[0].set_xlabel('X [pixels]')
-ax[0].set_ylabel('Y [pixels]')
-
-ax[1].set_xlabel('X [pixels]')
-ax[1].set_ylabel('Average counts [e]')
+ax3.set_title('Trimmed Display of Flat Frame')
+ax3.set_xlabel('X [pixels]')
+ax3.set_ylabel('Y [pixels]')
+ax4.set_title('Average Counts per Column (trimmed)')
+ax4.set_xlabel('X [pixels]')
+ax4.set_ylabel('Average Signal [e-]')
+plt.tight_layout()
 plt.show()
 
-# =============================================================================
-print("\n\n2.4 Computing the normalization factors")
-print("=============================================================================\n")
-
-"""
-2.4 Computing the normalization factors
-
-Computation of the median flat follows a similar strategy adopted for the median bias:
-
-we initialize a 3D array called stack, with dimensions equal to the number of images and the two dimensions of a frame
-we read the frames one by one, correct for bias, and store them in the stack.
-"""
-
+# ----------------------------------------------------------------------------
+# 2.4 Compute normalization factors for each flat frame
+# ----------------------------------------------------------------------------
+print("\n\n=== 2.4 Compute normalization factors ===")
 n_images = len(flat_list)
-flat00_nparray_dim00, flat00_nparray_dim01 = np.shape(flat00_data)
+ny, nx = flat00_data.shape
+stack = np.empty((n_images, ny, nx), dtype=float)
 
-stack = np.empty([n_images, flat00_nparray_dim00, flat00_nparray_dim01])
+# Build stack of bias-subtracted, gain-corrected flats
+for idx, fname in enumerate(flat_list):
+    with fits.open(f'{taste_dir}/flat/{fname}') as hdul:
+        data_e = hdul[0].data * hdul[0].header['GAIN']
+    stack[idx] = data_e - median_bias
+print(f"Stack dimensions: {stack.shape}")
 
-for i_flat, flat_name in enumerate(flat_list):
-    flat_temp = fits.open(f'{taste_dir}/flat/' + flat_name)
-    stack[i_flat, :, :] = flat_temp[0].data * flat_temp[0].header['GAIN'] - median_bias
-    flat_temp.close()
+# Define central box for reference median
+win = 50
+x0 = int(nx / 2 - win / 2)
+x1 = int(nx / 2 + win / 2)
+y0 = int(ny / 2 - win / 2)
+y1 = int(ny / 2 + win / 2)
+print(f"Central box coords: x=[{x0},{x1}), y=[{y0},{y1})")
 
-"""
-Before continuing, we have to remember the goal of flat calibration.
-
-The purpose of flat corrections is to compensate for any non-uniformity in the response of the CCD to light. 
-There can be several reasons for the non-uniform response across the detector:
-
-variations in the sensitivity of pixels in the detector.
-dust on either the filter or the glass window covering the detector.
-vignetting, a dimming in the corners of the image.
-anything else in the optical path that affects how much light reaches the sensor.
-The fix for the non-uniformity is the same in all cases: take an image with uniform illumination and use that to 
-measure the CCD's response.
-
-When illuminating the CCD, we want to reach the highest signal-to-noise ratio for every pixel. 
-As the photon noise goes with the square root of the flux, we need to achieve very high counts 
-(without reaching saturation). However, dividing the science frames by these very high counts would produce 
-unrealistically small photoelectron fluxes. Since we are interested in the relative response of the pixels, i.e., 
-how the pixels behave with respect to the others, and not to the absolute efficiency of each pixel, we can express 
-the flat correction as the correction value relative to the median response over a selected sample of pixels. e CCD.
-We can compute the reference value of each frame by taking the median within a box of 50x50 pixels in the centre 
-of each frame. Keep in mind that this is only one of the many possible approaches.
-Note: we convert the real number into integers using the function numpy.int16.
-Alternatively, we can use the Python built-in function int.
-"""
-
-windows_size = 50
-# x0, x1, y0, y1 represents the coordinates of the four corners
-x0 = np.int16(flat00_nparray_dim01 / 2 - windows_size / 2)
-x1 = np.int16(flat00_nparray_dim01 / 2 + windows_size / 2)
-y0 = np.int16(flat00_nparray_dim00 / 2 - windows_size / 2)
-y1 = np.int16(flat00_nparray_dim00 / 2 + windows_size / 2)
-
-print('Coordinates of the box: x0:{0}, x1:{1}, y0:{2}, y1:{3}'.format(x0, x1, y0, y1))
-
+# Calculate normalization factors and their uncertainties
 normalization_factors = np.median(stack[:, y0:y1, x0:x1], axis=(1, 2))
-print('Number of normalization factors (must be the same as the number of frames): {0}'.format(
-    np.shape(normalization_factors)))
-print(normalization_factors)
+norm_std = np.std(stack[:, y0:y1, x0:x1], axis=(1, 2)) / np.sqrt(win ** 2)
+print(f"Normalization factors (per frame): {normalization_factors}")
+print(f"Uncertainty on norms: {norm_std}")
 
-normalization_factors_std = np.std(stack[:, y0:y1, x0:x1], axis=(1, 2)) / np.sqrt(windows_size ** 2)
-print(normalization_factors_std)
-
+# Plot normalization factors
 plt.figure()
-x_frame = np.arange(0, n_images, 1)
-plt.scatter(x_frame, normalization_factors)
-plt.errorbar(x_frame, normalization_factors, normalization_factors_std, fmt='o', ms=2)
-plt.xlabel('Frame number')
-plt.ylabel('Average counts [e]')
+frames = np.arange(n_images)
+plt.errorbar(frames, normalization_factors, yerr=norm_std, fmt='o', ms=4)
+plt.title('Flat Field Normalization Factors')
+plt.xlabel('Frame Index')
+plt.ylabel('Median Signal in Central Box [e-]')
+plt.grid(True)
+plt.tight_layout()
 plt.show()
 
-# =============================================================================
-print("\n\n2.5 Flat normalization")
-print("=============================================================================\n")
+# ----------------------------------------------------------------------------
+# 2.5 Normalize the flat frames and compare methods
+# ----------------------------------------------------------------------------
+print("\n\n=== 2.5 Normalize flat frames ===")
+# Method 1: iterative
+stack_norm_iter = np.empty_like(stack)
+for i in range(n_images):
+    stack_norm_iter[i] = stack[i] / normalization_factors[i]
 
-"""
-2 Flat normalization
+# Method 2: vectorized
+stack_norm_vect = (stack.T / normalization_factors).T
 
-"""
+diff = np.max(np.abs(stack_norm_iter - stack_norm_vect))
+print(f"Max difference between normalization methods: {diff:.2e}")
+print(f"Floating-point machine epsilon: {np.finfo(float).eps:e}")
 
-stack_normalized_iter = stack * 0.  # initialization of the output array
-for i_flat in range(n_images):
-    stack_normalized_iter[i_flat, :, :] = stack[i_flat, :, :] / normalization_factors[i_flat]
+# ----------------------------------------------------------------------------
+# 2.6 Build and save median normalized flat and stacks
+# ----------------------------------------------------------------------------
+print("\n\n=== 2.6 Median normalized flat and save outputs ===")
+median_flat = np.median(stack_norm_vect, axis=0)
 
-print("shape of stack array           : ", np.shape(stack))
-print("shape of transposed stack array: ", np.shape(stack.T))
-
-stack_normalized = (stack.T / normalization_factors).T
-## First alternative:  stack_normalized = np.divide(stack.T, normalization_factors).T
-## Second alternative: stack_normalized = np.multiply(stack.T, 1./normalization_factors).T
-
-print("shape of normalized stack array: ", np.shape(stack_normalized))
-
-print("Maximum absolute difference between the two arrays: {0:2.6e}".format(
-    np.max(np.abs(stack_normalized_iter - stack_normalized))))
-
-"""
-The value may not be zero due to the computer's precision: Epsilon describes the round-off error for a 
-floating-point number with a certain amount of precision. It can be thought of as the smallest number 
-that can be added to 1.0 without changing its bits.
-"""
-print(np.finfo(float).eps)
-
-# =============================================================================
-print("\n\n2.6 Median flat")
-print("=============================================================================\n")
-
-"""
-2.6 Median flat
-"""
-
-median_normalized_flat = np.median(stack_normalized, axis=0)
-
+# Save outputs
 with open(f'{taste_dir}/flat/median_normalized_flat.p', 'wb', buffering=0) as f:
-    # noinspection PyTypeChecker
-    pickle.dump(median_normalized_flat, f)
-
+    pickle.dump(median_flat, f)
 with open(f'{taste_dir}/flat/flat_normalized_stack.p', 'wb') as f:
-    # noinspection PyTypeChecker
-    pickle.dump(stack_normalized, f)
-
+    pickle.dump(stack_norm_vect, f)
 with open(f'{taste_dir}/flat/flat_normalization_factors.p', 'wb') as f:
-    # noinspection PyTypeChecker
     pickle.dump(normalization_factors, f)
-
 with open(f'{taste_dir}/flat/flat_stack.p', 'wb') as f:
-    # noinspection PyTypeChecker
     pickle.dump(stack, f)
 
-i_image = 0
-nmin = np.amin(median_normalized_flat[:, 12:-12])
-nmax = np.amax(median_normalized_flat[:, 12:-12])
-print(vmin, vmax)
+# Display median flat
+nmin = np.min(median_flat[:, 12:-12])
+nmax = np.max(median_flat[:, 12:-12])
 
-fig, ax = plt.subplots(2, 1, figsize=(8, 6))  # Caution, figsize will also influence positions.
-im1 = ax[0].imshow(median_normalized_flat, origin='lower', vmin=nmin, vmax=nmax)
-median_column = np.average(median_normalized_flat, axis=0)
-im2 = ax[1].plot(median_column)
+fig, (ax5, ax6) = plt.subplots(2, 1, figsize=(8, 6))
+im3 = ax5.imshow(median_flat, origin='lower', vmin=nmin, vmax=nmax)
+avg_col = np.mean(median_flat, axis=0)
+ax6.plot(avg_col)
+ax6.set_ylim(nmin, nmax)
 
-# we set the plot limits
-ax[1].set_ylim(nmin, nmax)
+cbar3 = fig.colorbar(im3, ax=[ax5], fraction=0.046, pad=0.04)
+cbar3.set_label('Normalized Signal')
 
-# add the colorbar using the figure's method,
-# telling which mappable we're talking about and
-# which axes object it should be near
-cbar = fig.colorbar(im1, ax=ax, fraction=0.046, pad=0.04)
-cbar.set_label("e")
-
-ax[0].set_xlabel('X [pixels]')
-ax[0].set_ylabel('Y [pixels]')
-
-ax[1].set_xlabel('X [pixels]')
-ax[1].set_ylabel('Average value [normalized]')
+ax5.set_title('Median Normalized Flat')
+ax5.set_xlabel('X [pixels]')
+ax5.set_ylabel('Y [pixels]')
+ax6.set_title('Average Column Value (median flat)')
+ax6.set_xlabel('X [pixels]')
+ax6.set_ylabel('Normalized Signal')
+plt.tight_layout()
 plt.show()
 
-# =============================================================================
-print("\n\n2.7 Error propagation")
-print("=============================================================================\n")
-
-"""
-2.7 Error propagation
-
-Regarding the bias frames, the readout noise was the only contributor to the noise budget. Now, we have three contributors:
-
-the readout noise
-the error associated with the median bias frame
-the photon noise associated with the flux of the lamp
-Dark current would contribute as well, but it can be neglected for short exposures and for modern detectors in general.
-
-For 1) and 2), we already have an estimate of the error. For 3), we can assume that during the temporal interval 
-covered by our exposure, photons reach the detector with a constant mean rate and independently of the time since the 
-last event. (the arrival of one photon is not influenced by the other photons). In other words, 
-photos follow a Poisson distribution; as such, the variance (i.e., the expected value of the squared deviation 
-from the mean of a random variable.) is equal to the number of events, specifically the number of photoelectrons recorded.
-
-Noting that we have already removed the bias value (which does not contribute to the photon noise), 
-the photon noise associated with each measurement of each frame is given by the square root of the stack.
-"""
-
+# ----------------------------------------------------------------------------
+# 2.7 Error propagation in combined flat
+# ----------------------------------------------------------------------------
+print("\n\n=== 2.7 Error propagation ===")
+# Photon noise contribution: sqrt(signal)
 photon_noise = np.sqrt(np.abs(stack))
+total_error = np.sqrt(readout_noise ** 2 + bias_std ** 2 + photon_noise ** 2)
+total_error_norm = (total_error.T / normalization_factors).T
 
-stack_error = np.sqrt(readout_noise **2 + bias_std**2 +  photon_noise**2)
+# Combine errors by summing variances
+median_flat_error = np.sum(total_error_norm ** 2, axis=0) / n_images
+print(f"Median flat error array shape: {median_flat_error.shape}")
 
-stack_normalized_error = (stack_error.T/normalization_factors).T
-
-median_normalized_flat_errors = np.sum(stack_normalized_error**2, axis=0) / n_images
-print("shape of the median normalized error array: ", np.shape(median_normalized_flat_errors))
-
+# Save error map
 with open(f'{taste_dir}/flat/median_normalized_flat_errors.p', 'wb') as f:
-    # noinspection PyTypeChecker
-    pickle.dump(median_normalized_flat_errors, f)
+    pickle.dump(median_flat_error, f)
 
-# =============================================================================
-print("\n\n2.8 Some statistics on the flat")
-print("=============================================================================\n")
-
-"""
-2.8 Some statistics on the flat
-
-One question should arise: why normalize first, and then computing the median? Can I change the order without consequences?
-
-First, let's see what is the distribution of the counts before and after normalization. 
-For this example, I'm considering pixels in the range [100:105,250:255] (Python notation). 
-The normalized values have been rescaled to the average of the normalization factors to allow a direct comparison.
-
-If the flux of the lamp is constant, the two distributions should be extremely similar - almost identical.
-"""
-
-mean_normalization = np.mean(normalization_factors)
+# ----------------------------------------------------------------------------
+# 2.8 Statistics on the flat before vs after normalization
+# ----------------------------------------------------------------------------
+print("\n\n=== 2.8 Statistics on flat ===")
+# Define a small pixel box for comparison
+sample_box = stack[:, 40:45, 250:255]
+sample_norm = stack_norm_vect[:, 40:45, 250:255] * np.mean(normalization_factors)
 
 plt.figure()
-plt.hist(stack[:,40:45,250:255].flatten(), bins=20, alpha=0.5, label='Before norm.')
-plt.hist(stack_normalized[:,40:45,250:255].flatten()*mean_normalization, bins=20, alpha=0.5, label='After norm.')
-plt.xlabel('Counts [e]')
-plt.ylabel('#')
+plt.hist(sample_box.flatten(), bins=20, alpha=0.5, label='Before normalization')
+plt.hist(sample_norm.flatten(), bins=20, alpha=0.5, label='After normalization')
+plt.title('Distribution of Counts Before and After Normalization')
+plt.xlabel('Counts [e-]')
+plt.ylabel('Number of Pixels')
 plt.legend()
+plt.tight_layout()
 plt.show()
 
-"""
-There is a clear difference between the two distributions (can you quanitfy it)? 
-The reason appears clear if we plot the distribution of the normalization factors, 
-and we compare it with the theoretical distribution that they should have if the variations 
-was due to photon noise alone.
-"""
-
-sigma_mean_normalization = np.sqrt(mean_normalization)
-x = np.arange(np.amin(normalization_factors), np.amax(normalization_factors), 10)
-y = 1./(sigma_mean_normalization * np.sqrt(2 * np.pi)) * \
-               np.exp( - (x - mean_normalization)**2 / (2 * sigma_mean_normalization**2) )
+# Plot theoretical photon noise distribution for norms
+mean_norm = np.mean(normalization_factors)
+sigma_norm = np.sqrt(mean_norm)
+x = np.linspace(np.min(normalization_factors), np.max(normalization_factors), 100)
+y = 1 / (sigma_norm * np.sqrt(2 * np.pi)) * np.exp(- (x - mean_norm) ** 2 / (2 * sigma_norm ** 2))
 
 plt.figure()
-plt.hist(normalization_factors,alpha=0.5, density=True, label='Normalization factors')
-plt.plot(x,y)
-plt.xlabel('Counts [e]')
-plt.ylabel('Probability density')
+plt.hist(normalization_factors, bins=20, density=True, alpha=0.5, label='Measured norms')
+plt.plot(x, y, label='Photon-noise model')
+plt.title('Normalization Factor Distribution vs. Model')
+plt.xlabel('Normalization Factor [e-]')
+plt.ylabel('Probability Density')
 plt.legend()
+plt.tight_layout()
 plt.show()
-
-"""
-t appears clear that the variation in the illumination by the flat lamp 
-is not consistent with photon noise alone. After technical investigation, 
-a fluctuations in the voltage of the lamp has been discovered.
-
-For this reason, we performed the normalization, i.e., removing the variation of 
-illumination with time, before computing the median.
-"""
