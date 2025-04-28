@@ -1,0 +1,683 @@
+=== Avvio del log ===
+Prova di scrittura riuscita ✔
+
+===== Esecuzione di: lecture01_bias_analysis.py =====
+--- stdout ---
+
+
+Section 1.1: Download and move the dataset
+============================================================
+Please download the dataset from:
+https://drive.google.com/drive/folders/17FBWwLrFVDm5L7hEC9ZELETUy-sMqhjF
+and place it in the TASTE_analysis folder under your home directory.
+Example:
+  mkdir -p ~/TASTE_analysis
+  mv ~/Downloads/group05_QATAR-1_20230212 ~/TASTE_analysis/
+
+
+Section 1.2: Writing FITS list files for bias, flat, and science
+============================================================
+Scanning 'TASTE_analysis/group05_QATAR-1_20230212\bias' for .fits files...
+Wrote 30 entries to TASTE_analysis/group05_QATAR-1_20230212\bias\bias.list
+Scanning 'TASTE_analysis/group05_QATAR-1_20230212\flat' for .fits files...
+Wrote 30 entries to TASTE_analysis/group05_QATAR-1_20230212\flat\flat.list
+Scanning 'TASTE_analysis/group05_QATAR-1_20230212\science' for .fits files...
+Wrote 1857 entries to TASTE_analysis/group05_QATAR-1_20230212\science\science.list
+First 5 bias frames: ['AF819603.fits' 'AF819604.fits' 'AF819605.fits' 'AF819606.fits'
+ 'AF819607.fits']
+
+
+Section 1.3: Extracting header information from first bias frame
+============================================================
+Header keywords and values:
+ - JD: 2459988.726536    # 
+ - AIRMASS: 1.432    # 
+ - GAIN: 1.91    # 
+ - RDNOISE: 7.1    # 
+ - NAXIS1: 521    # 
+ - NAXIS2: 237    # 
+Converted JD = 2459988.726536, gain = 1.910 e/ADU, readout noise = 7.100 e
+
+
+Section 1.4: Checking array shape vs. FITS NAXIS
+============================================================
+FITS header NAXIS1 x NAXIS2: 521 x 237
+NumPy array shape (rows x cols): 237 x 521
+Array data type: <class 'numpy.ndarray'>
+
+
+Section 1.5: Building 3D stack of bias frames
+============================================================
+Number of bias frames: 30
+ Loaded AF819603.fits into stack index 0
+ Loaded AF819604.fits into stack index 1
+ Loaded AF819605.fits into stack index 2
+... completed loading all frames.
+Median bias frame shape: (237, 521)
+
+
+Section 1.6: Plotting a single frame and the median
+============================================================
+
+
+Section 1.7: Statistical analysis of bias variations and noise
+============================================================
+Header readout noise: 7.100 e
+STD of single frame (cols 300-350): 7.752 e
+Expected noise of median (fromRON/sqrt(N)): 1.296 e
+Expected STD of median (from data/sqrt(N)): 1.415 e
+Measured STD of median (cols 300-350): 1.769 e
+Median pixel-based error: 1.356 e
+
+
+Section 1.8: Saving outputs to pickle files
+============================================================
+Saved median_bias to TASTE_analysis/group05_QATAR-1_20230212\bias\median_bias.p
+Saved median_error_map to TASTE_analysis/group05_QATAR-1_20230212\bias\median_error_map.p
+Saved median_error_value to TASTE_analysis/group05_QATAR-1_20230212\bias\median_error_value.p
+Saved bias_stack to TASTE_analysis/group05_QATAR-1_20230212\bias\bias_stack.p
+Loaded median_bias with shape (237, 521)
+
+===== Esecuzione di: lecture02_flat_analysis.py =====
+--- stdout ---
+
+
+=== 2.1 Read the data ===
+Found 30 flat frames:
+['AF819633.fits' 'AF819634.fits' 'AF819635.fits' 'AF819636.fits'
+ 'AF819637.fits' 'AF819638.fits' 'AF819639.fits' 'AF819640.fits'
+ 'AF819641.fits' 'AF819642.fits' 'AF819643.fits' 'AF819644.fits'
+ 'AF819645.fits' 'AF819646.fits' 'AF819647.fits' 'AF819648.fits'
+ 'AF819649.fits' 'AF819650.fits' 'AF819651.fits' 'AF819652.fits'
+ 'AF819653.fits' 'AF819654.fits' 'AF819655.fits' 'AF819656.fits'
+ 'AF819657.fits' 'AF819658.fits' 'AF819659.fits' 'AF819660.fits'
+ 'AF819661.fits' 'AF819662.fits']
+CCD Gain         : 1.91 [e/ADU] CCD Camera gain
+CCD Readout noise: 7.10 [e] CCD Camera readout noise
+Image shape      : 521 x 237 pixels
+
+
+=== 2.2 Overscan inspection ===
+
+
+=== 2.3 Exclude overscan ===
+Display range (excluding overscan): vmin = 87120.83, vmax = 96791.16
+
+
+=== 2.4 Compute normalization factors ===
+Stack dimensions: (30, 237, 521)
+Central box coords: x=[235,285), y=[93,143)
+Normalization factors (per frame): [92453.55   93235.695  92522.31   93278.67   92535.68   93668.7875
+ 92539.5    93449.615  92707.58   93439.11   92738.14   93508.825
+ 92753.42   93570.9    92847.965  93586.18   92924.365  93545.5925
+ 92902.4    93611.01   92694.21   93632.02   92876.615  93618.1725
+ 92892.3725 93689.7975 92826.     93674.04   92898.1025 93650.6425]
+Uncertainty on norms: [7.56405645 7.80160405 7.76713999 7.99051706 7.68999177 7.92258941
+ 7.62879533 7.94812071 7.75749493 7.81306576 7.78950821 7.80475325
+ 7.59433611 7.93864294 7.88053689 7.72720756 7.67915395 7.80162359
+ 7.64103647 7.83568576 7.77890399 7.95051503 7.92395368 7.89746866
+ 7.67475648 7.9950228  7.53045865 7.71868405 7.80070841 7.83125191]
+
+
+=== 2.5 Normalize flat frames ===
+Max difference between normalization methods: 0.00e+00
+Floating-point machine epsilon: 2.220446e-16
+
+
+=== 2.6 Median normalized flat and save outputs ===
+
+
+=== 2.7 Error propagation ===
+Median flat error array shape: (237, 521)
+
+
+=== 2.8 Statistics on flat ===
+
+--- stderr ---
+C:\unipd\repositories\astrolab_2\lecture02_flat_analysis.py:57: UserWarning:
+
+This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+
+C:\unipd\repositories\astrolab_2\lecture02_flat_analysis.py:84: UserWarning:
+
+This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+
+C:\unipd\repositories\astrolab_2\lecture02_flat_analysis.py:178: UserWarning:
+
+This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+
+
+===== Esecuzione di: lecture03_science_analysis.py =====
+--- stdout ---
+
+--- 3.1 Read science image list ---
+Loading science list from: TASTE_analysis/group05_QATAR-1_20230212\science\science.list
+Found 1857 science frames.
+Using first 10 frames for pipeline testing.
+
+--- 3.2 Data reduction parameters and calibration frames ---
+Calibration frames loaded:
+  - Median bias frame (ADU)
+  - Median normalized flat-field and its error
+Data reduction pipeline test completed for subset.
+
+--- 3.3 Saving corrected frames and error maps ---
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817746_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817746_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817747_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817747_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817748_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817748_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817749_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817749_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817750_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817750_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817751_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817751_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817752_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817752_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817753_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817753_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817754_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817754_corr_errors.p
+Saved: TASTE_analysis/group05_QATAR-1_20230212\correct\AF817755_corr.p and TASTE_analysis/group05_QATAR-1_20230212\correct\AF817755_corr_errors.p
+All corrected frames and errors saved.
+
+--- 3.4 Extracting observing metadata ---
+Header comments for first frame:
+  JD     : JD at start
+  EXPTIME: [s] Exposure time
+  AIRMASS: Telescope airmass at start
+
+Extracted metadata for 10 frames.
+
+--- 3.5 Converting times to BJD_TDB ---
+Computed BJD_TDB for 10 observations.
+--- 3.6 Plotting light travel time variation over a year ---
+Average light travel time: -1.36 minutes
+Average difference between JD_UTC and BJD_TDB: 12.18 seconds
+
+===== Esecuzione di: lecture04_centroid_analysis.py =====
+--- stdout ---
+
+
+1.1 Reading the first corrected science frame...
+Found 1857 science frames
+Loading corrected frame: TASTE_analysis/group05_QATAR-1_20230212/correct/AF817746_corr.p
+Frame shape: (237, 521)
+Estimated vmin=817.0, vmax=62400.3
+Approximate target coordinates: x=416, y=74
+Approximate reference star: x=298, y=107
+Approximate reference star: x=117, y=40
+
+
+1.2 Plotting initial regions for star identification...
+
+
+1.3 Drawing annulus around target and generating 3D plots...
+
+3D flux distribution of the entire frame...
+
+Zoomed 3D around target star...
+
+
+1.5 Comparing distance computation methods...
+Current time (s since epoch): 1745816431.1050
+Time to print: 0.000000 s
+Nested loops: 0.1341 s
+Meshgrid method: 0.0010 s
+Speedup: 139.3x
+
+
+1.6 Weighted centroid and radius check...
+Weighted centroid: x=415.79, y=73.92
+Visual comparison of inner radii...
+
+
+1.7 Iterative refinement of centroid...
+Iter  0: x=415.665 (-0.03%), y=73.855 (-0.08%)
+Convergence achieved
+
+
+1.8 FWHM measurement via cumulative distribution...
+FWHM: X = 6.98 px,  Y = 7.62 px
+Estimated seeing: X = 6.98"  Y = 7.62"
+
+===== Esecuzione di: lecture05_aperture_photometry.py =====
+--- stdout ---
+
+
+ 2.1 Reading science frame and error estimates
+================================================================================
+Loading corrected frame: AF817751_corr.p and its errors
+Loaded science frame and errors in 0.00 seconds
+
+
+ 2.2 Computing coordinate grids and pixel distances
+================================================================================
+Frame size: 521 x 237 pixels
+Target at (x, y) = (415.851, 73.959)
+
+
+ 2.3 Defining helper function to draw aperture and annulus
+================================================================================
+
+
+ 2.4 Visualizing annulus selection for sky background
+================================================================================
+Display limits -> vmin: 810.9, vmax: 1621.8
+
+
+ 2.5 Computing sky background level within annulus
+================================================================================
+Pixels in annulus: 487
+Average sky flux: 955.30 photons/pixel
+Median  sky flux: 953.93 photons/pixel
+
+
+ 2.5b Estimating uncertainty on sky background level
+================================================================================
+Sky background error: 1.46 photons/pixel
+Mean vs median consistent within error? True
+
+
+ 2.6 Subtracting sky background from entire frame
+================================================================================
+Sky subtraction complete; arrays updated.
+
+
+ 2.7 Performing aperture photometry at multiple radii
+================================================================================
+
+Candidate apertures:
+  Radius = 5.0 px -> Flux = 422359.9 Â± 715.5
+  Radius = 13.0 px -> Flux = 461587.3 Â± 1011.8
+
+
+ 2.8 Comparing measured profile to Gaussian PSF models
+================================================================================
+
+All computations complete.
+
+===== Esecuzione di: lecture06_aperture_photometry_with_classes.py =====
+--- stdout ---
+Loading calibration frames...
+Calibration frames loaded.
+
+Found 1857 science frames.
+
+Aperture params â†’ sky_inner=13, sky_outer=18, aperture=8
+Initial guess â†’ x0=415, y0=73
+
+Starting aperture photometry...
+
+
+Converting JD â†’ BJD_TDB...
+Done.
+
+Light curve detrended.
+Elapsed time: 18.4 s
+
+
+===== Esecuzione di: lecture07_differential_photometry.py =====
+--- stdout ---
+Loading science list from: TASTE_analysis/group05_QATAR-1_20230212/science/science.list
+Loading first corrected frame: TASTE_analysis/group05_QATAR-1_20230212/correct/AF817746_corr.p
+Displaying example frame with apertures and annuli...
+Running aperture photometry on target and references...
+Loading calibration frames...
+Calibration frames loaded.
+
+Found 1857 science frames.
+
+Aperture params â†’ sky_inner=10, sky_outer=18, aperture=8
+Initial guess â†’ x0=416, y0=74
+
+Starting aperture photometry...
+
+
+Converting JD â†’ BJD_TDB...
+Done.
+
+Light curve detrended.
+Loading calibration frames...
+Calibration frames loaded.
+
+Found 1857 science frames.
+
+Aperture params â†’ sky_inner=10, sky_outer=18, aperture=8
+Initial guess â†’ x0=298, y0=107
+
+Starting aperture photometry...
+
+
+Converting JD â†’ BJD_TDB...
+Done.
+
+Light curve detrended.
+Loading calibration frames...
+Calibration frames loaded.
+
+Found 1857 science frames.
+
+Aperture params â†’ sky_inner=10, sky_outer=18, aperture=8
+Initial guess â†’ x0=117, y0=40
+
+Starting aperture photometry...
+
+
+Converting JD â†’ BJD_TDB...
+Done.
+
+Light curve detrended.
+Aperture photometry done in 53.87 s
+Generating diagnostics...
+Computing differential photometry and errorsâ€¦
+Plotting sum-of-refs with errorbars and transit flagsâ€¦
+STD Sum of refs (OOT): 0.0030460
+STD Ref #1: 0.0143903
+STD Ref #2: 0.0039083
+STD Sum of refs: 0.0030460
+Testing aperture = 5 pxâ€¦
+Loading calibration frames...
+Calibration frames loaded.
+
+Found 1857 science frames.
+
+Aperture params â†’ sky_inner=13, sky_outer=18, aperture=5
+Initial guess â†’ x0=416, y0=74
+
+Starting aperture photometry...
+
+
+Converting JD â†’ BJD_TDB...
+Done.
+
+Light curve detrended.
+Loading calibration frames...
+Calibration frames loaded.
+
+Found 1857 science frames.
+
+Aperture params â†’ sky_inner=13, sky_outer=18, aperture=5
+Initial guess â†’ x0=298, y0=107
+
+Starting aperture photometry...
+
+
+Converting JD â†’ BJD_TDB...
+Done.
+
+Light curve detrended.
+Loading calibration frames...
+Calibration frames loaded.
+
+Found 1857 science frames.
+
+Aperture params â†’ sky_inner=13, sky_outer=18, aperture=5
+Initial guess â†’ x0=117, y0=40
+
+Starting aperture photometry...
+
+
+Converting JD â†’ BJD_TDB...
+Done.
+
+Light curve detrended.
+STD 5px Ref #1: 0.0106577
+STD 5px Ref #2: 0.0103466
+STD 5px Both: 0.0102509
+
+===== Esecuzione di: lecture08_tess_pixels_analysis.py =====
+--- stdout ---
+
+=== 1. Files being used ===
+  â€¢ Sector 24 TPF: TESS_analysis/qatar_1_sector24_tp.fits
+  â€¢ Sector 25 TPF: TESS_analysis/qatar_1_sector25_tp.fits
+  â€¢ Sector 24 LC : TESS_analysis/qatar_1_sector24_lc.fits
+  â€¢ Sector 25 LC : TESS_analysis/qatar_1_sector25_lc.fits
+
+=== 2. TPF file structure (fits.info) ===
+Filename: TESS_analysis/qatar_1_sector24_tp.fits
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU      44   ()      
+  1  PIXELS        1 BinTableHDU    248   19074R x 11C   [D, E, J, 121J, 121E, 121E, 121E, 121E, J, E, E]   
+  2  APERTURE      1 ImageHDU        49   (11, 11)   int32   
+  3  TARGET COSMIC RAY    1 BinTableHDU     27   0R x 4C   [J, I, I, E]   
+
+-- HDU List for Sector 24 TPF --
+Filename: TESS_analysis/qatar_1_sector24_tp.fits
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU      44   ()      
+  1  PIXELS        1 BinTableHDU    248   19074R x 11C   [D, E, J, 121J, 121E, 121E, 121E, 121E, J, E, E]   
+  2  APERTURE      1 ImageHDU        49   (11, 11)   int32   
+  3  TARGET COSMIC RAY    1 BinTableHDU     27   0R x 4C   [J, I, I, E]   
+
+Columns in the PIXELS extension (HDU=1):
+ColDefs(
+    name = 'TIME'; format = 'D'; unit = 'BJD - 2457000, days'; disp = 'D14.7'
+    name = 'TIMECORR'; format = 'E'; unit = 'd'; disp = 'E14.7'
+    name = 'CADENCENO'; format = 'J'; disp = 'I10'
+    name = 'RAW_CNTS'; format = '121J'; unit = 'count'; null = -1; disp = 'I8'; dim = '(11,11)'
+    name = 'FLUX'; format = '121E'; unit = 'e-/s'; disp = 'E14.7'; dim = '(11,11)'
+    name = 'FLUX_ERR'; format = '121E'; unit = 'e-/s'; disp = 'E14.7'; dim = '(11,11)'
+    name = 'FLUX_BKG'; format = '121E'; unit = 'e-/s'; disp = 'E14.7'; dim = '(11,11)'
+    name = 'FLUX_BKG_ERR'; format = '121E'; unit = 'e-/s'; disp = 'E14.7'; dim = '(11,11)'
+    name = 'QUALITY'; format = 'J'; disp = 'B16.16'
+    name = 'POS_CORR1'; format = 'E'; unit = 'pixel'; disp = 'E14.7'
+    name = 'POS_CORR2'; format = 'E'; unit = 'pixel'; disp = 'E14.7'
+)
+
+=== 3. Plotting first valid FLUX image (Sector 24) ===
+  â€¢ Using cadence index 0 with shape (11, 11)
+
+=== 4. Plotting first valid FLUX image (Sector 25) ===
+  â€¢ Sector 25: using cadence index 0
+
+=== 5. Aperture Mask (HDU=2) ===
+  â€¢ Aperture mask shape: (11, 11), dtype: >i4
+  â€¢ Sample bitmask values:
+ [[65 65 65 65 65 65 65 65 65 65 65]
+ [65 65 69 69 65 65 69 69 69 65 65]
+ [65 65 69 69 65 65 69 69 69 65 65]
+ [65 65 65 65 65 65 65 65 69 69 65]
+ [65 65 69 65 65 75 75 65 65 65 65]
+ [65 65 69 69 65 75 75 75 65 65 65]
+ [65 65 69 69 65 75 75 75 65 65 65]
+ [65 65 69 69 65 65 65 65 65 65 65]
+ [65 65 65 65 65 69 69 69 65 65 69]
+ [65 65 65 65 65 69 69 69 69 65 69]
+ [65 65 65 65 65 65 65 65 65 65 65]]
+
+=== 6. Bitmask decoding examples ===
+  â€¢ Value 75: bits set [0, 1, 3, 6] -> ['Collected by spacecraft', 'Used in optimal photometric aperture (SAP_FLUX)', 'Used for PSF-based centroid', 'On CCD output B']
+  â€¢ Value 69: bits set [0, 2, 6] -> ['Collected by spacecraft', 'Used for flux-weighted centroid', 'On CCD output B']
+  â€¢ Pixel value 75 has the optimal-aperture bit set.
+
+=== 7. TARGET COSMIC RAY extension ===
+  â€¢ HDU name: TARGET COSMIC RAY
+  â€¢ Columns: ['CADENCENO', 'RAWX', 'RAWY', 'COSMIC_RAY']
+  â€¢ Number of cosmic-ray events: 0
+
+--- Light Curve file (Sector 24) ---
+Filename: TESS_analysis/qatar_1_sector24_lc.fits
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU      44   ()      
+  1  LIGHTCURVE    1 BinTableHDU    167   19074R x 20C   [D, E, J, E, E, E, E, E, E, J, D, E, D, E, D, E, D, E, E, E]   
+  2  APERTURE      1 ImageHDU        49   (11, 11)   int32   
+  â€¢ Available columns: ['TIME', 'TIMECORR', 'CADENCENO', 'SAP_FLUX', 'SAP_FLUX_ERR', 'SAP_BKG', 'SAP_BKG_ERR', 'PDCSAP_FLUX', 'PDCSAP_FLUX_ERR', 'QUALITY', 'PSF_CENTR1', 'PSF_CENTR1_ERR', 'PSF_CENTR2', 'PSF_CENTR2_ERR', 'MOM_CENTR1', 'MOM_CENTR1_ERR', 'MOM_CENTR2', 'MOM_CENTR2_ERR', 'POS_CORR1', 'POS_CORR2']
+  â€¢ Plotting 18398 valid points out of 19074 total.
+
+--- Light Curve file (Sector 25) ---
+Filename: TESS_analysis/qatar_1_sector25_lc.fits
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU      44   ()      
+  1  LIGHTCURVE    1 BinTableHDU    167   18489R x 20C   [D, E, J, E, E, E, E, E, E, J, D, E, D, E, D, E, D, E, E, E]   
+  2  APERTURE      1 ImageHDU        49   (11, 11)   int32   
+  â€¢ Available columns: ['TIME', 'TIMECORR', 'CADENCENO', 'SAP_FLUX', 'SAP_FLUX_ERR', 'SAP_BKG', 'SAP_BKG_ERR', 'PDCSAP_FLUX', 'PDCSAP_FLUX_ERR', 'QUALITY', 'PSF_CENTR1', 'PSF_CENTR1_ERR', 'PSF_CENTR2', 'PSF_CENTR2_ERR', 'MOM_CENTR1', 'MOM_CENTR1_ERR', 'MOM_CENTR2', 'MOM_CENTR2_ERR', 'POS_CORR1', 'POS_CORR2']
+  â€¢ Plotting 17547 valid points out of 18489 total.
+
+All steps completed successfully.
+
+===== Esecuzione di: lecture09_tess_light_curves.py =====
+--- stdout ---
+
+================================================================================
+1. Loading FITS: TESS_analysis\qatar_1_sector24_lc.fits
+================================================================================
+
+Inspecting FITS structure:
+Filename: TESS_analysis\qatar_1_sector24_lc.fits
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU      44   ()      
+  1  LIGHTCURVE    1 BinTableHDU    167   19074R x 20C   [D, E, J, E, E, E, E, E, E, J, D, E, D, E, D, E, D, E, E, E]   
+  2  APERTURE      1 ImageHDU        49   (11, 11)   int32   
+Data counts: TIME=19074, SAP=19074, PDCSAP=19074, Q=19074
+Non-finite PDCSAP indices: [   0    1    2    3 3620 3719 3811 3901 3983 4025]
+Number of BJD epochs  : (19074,)
+Number of SAP epochs  : (19074,)
+Number of PDCSAP epochs: (19074,)
+Some elements of PDCSAP flux [10:20]: [2888.6018 2896.4187 2893.033  2895.6948 2891.2754 2886.8438 2890.308
+ 2880.5618 2896.712  2880.402 ]
+Conservative: 18217 / 19074 points kept.
+Selective: kept 18217 points (ref_mask=21183).
+Segment 1: 2458955.79415
+Segment 2: 2458956.67699
+Segment 3: 2458957.55982
+Segment 4: 2458958.44265
+Segment 5: 2458959.32549
+Segment 6: 2458960.20832
+Segment 7: 2458961.09115
+Segment 8: 2458961.97399
+Segment 9: 2458962.85682
+Segment 10: 2458963.73965
+Segment 11: 2458964.62249
+Segment 12: 2458965.50532
+Segment 13: 2458966.38815
+Segment 14: 2458967.27099
+Segment 15: 2458968.15382
+Segment 16: 2458969.03665
+Segment 17: 2458969.91949
+Segment 18: 2458970.80232
+Segment 19: 2458971.68515
+Segment 20: 2458972.56799
+Segment 21: 2458973.45082
+Segment 22: 2458974.33365
+Segment 23: 2458975.21649
+Segment 24: 2458976.09932
+Segment 25: 2458976.98215
+Segment 26: 2458977.86499
+Segment 27: 2458978.74782
+Segment 28: 2458979.63065
+Segment 29: 2458980.51349
+Segment 30: 2458981.39632
+Segment 31: 2458982.27915
+Manual: 14406 punti finali su 19074 iniziali conservativi.
+
+===== Esecuzione di: lecture10_tess_light_curves_filtering.py =====
+--- stdout ---
+# 1. Loading selected TESS light curve data
+Loading data from: TESS_analysis/qatar1_TESS_sector024_selected.p
+Loaded 14406 points
+Masked 2472 in-transit points
+HSpline flattening done (w=0.5) with and without mask
+STD SAP hspline w=0.5: 0.002977
+STD PDCSAP hspline w=0.5: 0.002967
+STD SAP biweight w=1.0: 0.002982
+STD PDCSAP biweight w=1.0: 0.002970
+STD SAP biweight w=1.5: 0.002986
+STD PDCSAP biweight w=1.5: 0.002972
+STD SAP hspline w=1.0: 0.002981
+STD PDCSAP hspline w=1.0: 0.002970
+STD SAP hspline w=1.5: 0.002987
+STD PDCSAP hspline w=1.5: 0.002976
+Saved filtered data to: TESS_analysis/qatar1_TESS_sector024_filtered.p
+Done.
+[0m
+--- stderr ---
+C:\Users\AlbyF\AppData\Local\Programs\Python\Python39\lib\site-packages\sklearn\linear_model\_huber.py:342: ConvergenceWarning:
+
+lbfgs failed to converge (status=1):
+STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+
+C:\Users\AlbyF\AppData\Local\Programs\Python\Python39\lib\site-packages\sklearn\linear_model\_huber.py:342: ConvergenceWarning:
+
+lbfgs failed to converge (status=1):
+STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+
+C:\Users\AlbyF\AppData\Local\Programs\Python\Python39\lib\site-packages\sklearn\linear_model\_huber.py:342: ConvergenceWarning:
+
+lbfgs failed to converge (status=1):
+STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+
+C:\Users\AlbyF\AppData\Local\Programs\Python\Python39\lib\site-packages\sklearn\linear_model\_huber.py:342: ConvergenceWarning:
+
+lbfgs failed to converge (status=1):
+STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+
+C:\Users\AlbyF\AppData\Local\Programs\Python\Python39\lib\site-packages\sklearn\linear_model\_huber.py:342: ConvergenceWarning:
+
+lbfgs failed to converge (status=1):
+STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+
+C:\Users\AlbyF\AppData\Local\Programs\Python\Python39\lib\site-packages\sklearn\linear_model\_huber.py:342: ConvergenceWarning:
+
+lbfgs failed to converge (status=1):
+STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+
+C:\Users\AlbyF\AppData\Local\Programs\Python\Python39\lib\site-packages\sklearn\linear_model\_huber.py:342: ConvergenceWarning:
+
+lbfgs failed to converge (status=1):
+STOP: TOTAL NO. of ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+
+
+===== Esecuzione di: lecture11_tess_light_curve_transit_model.py =====
+--- stdout ---
+
+1) Loading selected light curves...
+Data loaded successfully.
+
+2) Testing batman with a simple transit model...
+
+3) Loading preliminary Qatar-1b parameters...
+
+4) Deriving limb darkening coefficients...
+Available filters: {'kepler': 'Kepler/Kepler.k', 'tess': 'TESS/TESS.Red', 'sdss_g': 'SLOAN/SDSS.g', 'sdss_r': 'SLOAN/SDSS.r', 'sdss_i': 'SLOAN/SDSS.i', 'sdss_z': 'SLOAN/SDSS.z'}
+SDSS r: u1=0.653, u2=0.075
+TESS   : u1=0.515, u2=0.104
+
+5) Updating transit model with refined limb darkening...
+
+Parameters available for MCMC analysis:
+t0: 2457475.204489
+Period: 1.420024443
+Radius ratio (rp): 0.1463
+Scaled semi-major axis (a): 6.25
+Inclination (inc): 84.08
+Eccentricity (ecc): 0.0
+Argument of periastron (w): 90.0
+Limb darkening coefficients (u): [0.5149100330858399, 0.10384393441220323]
+Limb darkening law: quadratic
+All steps completed.
+[0m
+===== Esecuzione di: lecture12_tess_light_curve_model_fit_new.py =====
+--- stdout ---
+[1] Simulating synthetic data around true parameters...
+[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m[0m
+===== Esecuzione di: main.py =====
+--- stdout ---
+davide gay
+
+===== FINE DI TUTTE LE ESECUZIONI =====
