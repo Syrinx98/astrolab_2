@@ -155,9 +155,9 @@ def main():
     fig.subplots_adjust(hspace=0.05)
 
     # Flux
-    axs[0].scatter(bjd-offset, target.aperture/target.aperture[norm_idx], s=5, label='Target')
-    axs[0].scatter(bjd-offset, ref1.aperture/ref1.aperture[norm_idx], s=5, label='Ref #1')
-    axs[0].scatter(bjd-offset, ref2.aperture/ref2.aperture[norm_idx], s=5, label='Ref #2')
+    axs[0].scatter(bjd-offset, target.detrended_flux/target.detrended_flux[norm_idx], s=5, label='Target')
+    axs[0].scatter(bjd-offset, ref1.detrended_flux/ref1.detrended_flux[norm_idx], s=5, label='Ref #1')
+    axs[0].scatter(bjd-offset, ref2.detrended_flux/ref2.detrended_flux[norm_idx], s=5, label='Ref #2')
     axs[0].set_ylabel('Normalized Flux'); axs[0].legend(fontsize='small')
 
     # Airmass

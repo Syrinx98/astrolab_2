@@ -157,7 +157,7 @@ class AperturePhotometry:
         x_ref, y_ref = self.x_initial, self.y_initial
         print("Starting aperture photometry...\n")
         for i, fname in enumerate(self.science_list, 1):
-            print(f"[{i}/{N}] {fname}")
+            # print(f"[{i}/{N}] {fname}")
             with fits.open(self.science_path + fname) as hdul:
                 hdr  = hdul[0].header
                 data = hdul[0].data.astype(float) * self.gain
